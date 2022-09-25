@@ -9,6 +9,12 @@
  */
 package net.degoes.afd.ruleengine
 
+/**
+  * Create a persistence layer for your declarative rule set, using JSON as the
+  * format. You may use any JSON library that you like.
+  * 
+  * Note: You may have to make persistable any data types used by rule set.
+  */
 object persistence {
   import net.degoes.afd.ruleengine.declarative._
 
