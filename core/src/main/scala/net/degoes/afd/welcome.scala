@@ -4,9 +4,9 @@ object welcome {
   //
   // Please join and say hello:
   //
-  // CHAT ROOM: https://discord.gg/VYvFKC8
+  // CHAT ROOM: https://discord.gg/VYvFKC8 (#advanced-functional-design)
   //
-  // Please git clone and build:
+  // Please fork, clone and build:
   //
   // REPOSITORY: https://github.com/jdegoes/advanced-functional-design
   //
