@@ -13,6 +13,11 @@ import net.degoes.afd.examples.loyalty._
 import net.degoes.afd.examples.loyalty.LoyaltyTier.Bronze
 import net.degoes.afd.examples.loyalty.LoyaltyTier.Gold
 import net.degoes.afd.examples.loyalty.LoyaltyTier.Silver
+import net.degoes.afd.ruleengine.basicsdeclarative.LoyaltyAction.AdjustPoints
+import net.degoes.afd.ruleengine.basicsdeclarative.LoyaltyAction.Unchanged
+import net.degoes.afd.ruleengine.basicsdeclarative.LoyaltyAction.UpgradeTier
+import net.degoes.afd.ruleengine.basicsdeclarative.LoyaltyAction.DowngradeTier
+import net.degoes.afd.ruleengine.basicsdeclarative.LoyaltyAction.Both
 
 /**
  * Create a functional domain to express how customer actions translate into
@@ -25,6 +30,8 @@ import net.degoes.afd.examples.loyalty.LoyaltyTier.Silver
  * constructors, binary operators, and unary operators.
  */
 object basicsdeclarative {
+
+  // TODO: use 01-basics to implement the rest in declartive fashion
 
   // recap so keep it simple..
 
@@ -43,6 +50,7 @@ object basicsdeclarative {
     def ++(that: LoyaltyAction): LoyaltyAction = LoyaltyAction.Both(self, that)
 
     final def update(program: LoyaltyProgram): LoyaltyProgram = self match {
+      case AdjustPoints(points)    => program.copy(points = program.points + points)
       case LoyaltyAction.Unchanged => program
       case LoyaltyAction.UpgradeTier =>
         program.copy(tier = program.tier match {
@@ -56,10 +64,15 @@ object basicsdeclarative {
           case Gold   => Silver
           case Silver => Bronze
         })
-      case LoyaltyAction.AdjustPoints(points) => ???
+      case Both(left, right) =>
+        // associtivity ?
+        // left.update(right.update(program))
+        // or
+        right.update(left.update(program))
     }
   }
   object LoyaltyAction {
+
     def adjustPoints(value: Int): LoyaltyAction = AdjustPoints(value)
     val downgradeTier: LoyaltyAction            = DowngradeTier
     val none: LoyaltyAction                     = Unchanged
