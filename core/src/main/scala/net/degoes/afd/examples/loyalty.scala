@@ -29,6 +29,8 @@ object LoyaltyTier {
 }
 
 object rewards {
+
+  // Note: update loyalty program based on flight booking status
   def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram =
     booking match {
       case FlightBooking(_, Customer(_, _, _, _), _, price, FlightBookingStatus.Confirmed) =>
