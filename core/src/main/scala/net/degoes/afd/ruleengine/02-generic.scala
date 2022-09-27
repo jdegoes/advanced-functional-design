@@ -23,6 +23,7 @@ import net.degoes.afd.examples.loyalty.LoyaltyTier.Silver
  */
 object generic {
 
+  // Nicetohave: Out => Action (would require the existing Action to be renamed)
   final case class RuleEngine[In, Out](update: In => Option[List[Out]]) { self =>
 
     // Niecetohave: impl  >>> and contramap
@@ -183,7 +184,7 @@ object generic {
       val exampleCondition = LoyaltyCondition.status(_ == FlightBookingStatus.Confirmed) &&
         LoyaltyCondition.price(_ > 1000)
 
-      // note: debate >>> versus ++, >>> did compile in an aerly version but is incorrect because of ...
+      // note: debate >>> versus ++, >>> did compile in an early version but was incorrect because of ...
       val exampleAction = LoyaltyAction.upgradeTier ++ LoyaltyAction.adjustPoints(100)
 
       val exampleRule = LoyaltyRule(exampleCondition, exampleAction)
