@@ -99,6 +99,11 @@ object declarative {
   // scala.io.StdIn.readLine().length() + scala.util.Random.nextInt()
   // In => Out
   sealed trait Expr[-In, +Out] { self =>
+
+    // TODO slide 50 and so forth check palce
+    final def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Add, tag)
+
     def &&[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
       Expr.And(self.widen[Boolean], that)
 
@@ -109,6 +114,15 @@ object declarative {
 
     final def <[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] = Expr.LessThan(self, that)
 
+    final def <=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      (self < that) || (self === that)
+
+    final def >[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] = !(self <= that)
+
+    final def >=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] = !(self < that)
+
+    final def >>>[Out2](that: Expr[Out, Out2]): Expr[In, Out2] = Expr.Pipe(self, that)
+
     def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen[Boolean])
 
     // Note: casting becasue its safe (tm)
@@ -117,6 +131,12 @@ object declarative {
 
     // TODO input
   }
+
+  sealed trait Numeric[A]
+  object Numeric {
+    implicit case object ByteIsNumeric extends Numeric[Byte]
+  }
+
   object Expr {
 
     // Note: we can use this to be able  ...
@@ -129,11 +149,30 @@ object declarative {
     final case class Not[In](condition: Expr[In, Boolean])                      extends Expr[In, Boolean]
     final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
     final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
-    // TODO: division
+    // Niecetohave: division
     final case class Input[In, Out](tag: PrimitiveType[Out]) extends Expr[In, Out]
+    // TODO 40
+    final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
 
+    // TODO slide 45 and so forth
+    final case class BinaryNumericOp[In, Out](
+      lhs: Expr[In, Out],
+      rhs: Expr[In, Out],
+      op: NumericBinOpType,
+      tag: Numeric[Out]
+    ) extends Expr[In, Out]
+
+    sealed trait NumericBinOpType
+    object NumericBinOpType {
+      case object Add      extends NumericBinOpType
+      case object Subtract extends NumericBinOpType
+      case object Multiply extends NumericBinOpType
+      case object Divide   extends NumericBinOpType
+      case object Modulo   extends NumericBinOpType
+    }
     implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
 
+    def input[A](implicit tag: PrimitiveType[A]): Expr[A, A] = Input(tag)
     // Expr(123)
     // Expr("sdf")
     // Expr(<something that will no compilole>)
@@ -179,27 +218,16 @@ object declarative {
 
   // In => Boolean
   // Expr[Boolean]
-  sealed trait Condition[-In] { self =>
+  final case class Condition[-In](expr: Expr[In, Boolean]) { self =>
 
-    def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.And(self, that)
+    def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(self.expr && that.expr)
 
-    def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.Or(self, that)
+    def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(self.expr || that.expr)
 
-    def eval(in: In): Boolean = Condition.eval(self)(in)
-
-    def unary_! : Condition[In] = Condition.Not(self)
+    def unary_! : Condition[In] = Condition(!expr)
 
   }
   object Condition { self =>
-    final case class Constant(value: Boolean)                           extends Condition[Any]
-    final case class And[In](left: Condition[In], right: Condition[In]) extends Condition[In]
-    final case class Or[In](left: Condition[In], right: Condition[In])  extends Condition[In]
-    final case class Not[In](condition: Condition[In])                  extends Condition[In]
-    // TODO fix lhs and rhs
-    final case class IsEqualTo[In](rhs: In, primitiveType: PrimitiveType[In]) extends Condition[In]
-    final case class LessThan[In](rhs: In, primitiveType: PrimitiveType[In])  extends Condition[In]
-
-    final case class Input[In](tag: PrimitiveType[In]) extends Expr[In, In]
 
     // Note: we can not use scala math ordering because its executable encoding
     // scala.math.Ordering
@@ -209,22 +237,16 @@ object declarative {
 
     val never: Condition[Any] = constant(false)
 
-    def constant[In](value: Boolean): Condition[In] = Constant(value)
+    def constant[In](value: Boolean): Condition[In] = Condition(Expr(value))
 
-    def eval[In](condition: Condition[In])(in: In): Boolean = condition match {
-      case Constant(value)     => value
-      case And(left, right)    => eval(left)(in) && eval(right)(in)
-      case Or(left, right)     => eval(left)(in) || eval(right)(in)
-      case Not(condition)      => !eval(condition)(in)
-      case IsEqualTo(rhs, tag) => tag.ordering.compare(in, rhs) == 0
-      case LessThan(rhs, tag)  => tag.ordering.compare(in, rhs) < 0
-    }
+    def isEqualTo[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+      Condition(Expr.input[In] === Expr(rhs))
 
-    def isEqualTo[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = IsEqualTo(in, tag)
+    def isLessThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+      Condition(Expr.input[In] < Expr(rhs))
 
-    def isLessThan[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = LessThan(in, tag)
-
-    def isGreaterThan[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = LessThan(in, tag)
+    def isGreaterThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+      Condition(Expr.input[In] > Expr(rhs))
 
     // Note: fromFunction can not be solved due to serialization
   }
@@ -249,9 +271,11 @@ object declarative {
   object Action { self =>
     final case class Concat[In, Out1, Out2](left: Action[In, Out1], right: Action[In, Out2]) extends Action[In, Out2]
     final case class Pipe[In, Out1, Out2](left: Action[In, Out1], right: Action[Out1, Out2]) extends Action[In, Out2]
-    final case class Constant[Out](value: Out, tag: PrimitiveType[Out])                      extends Action[Any, Out]
+    final case class FromExpr[In, Out](expr: Expr[In, Out])                                  extends Action[In, Out]
 
-    def constant[Out](out: Out)(implicit tag: PrimitiveType[Out]): Action[Any, Out] = Constant(out, tag)
+    def fromExpr[In, Out](expr: Expr[In, Out]): Action[In, Out] = FromExpr(expr)
+
+    def constant[Out](out: Out)(implicit tag: PrimitiveType[Out]): Action[Any, Out] = fromExpr(Expr(out))
   }
 
   object loyalty {
