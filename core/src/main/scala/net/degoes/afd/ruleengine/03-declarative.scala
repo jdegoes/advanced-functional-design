@@ -258,7 +258,7 @@ object declarative {
   // - Send email
   // Outs are kind of instructons that tells us what to do.
 
-  // In => List[Out]
+  // In => NonEmptyList[Out]
   sealed trait Action[-In, +Out] { self =>
 
     def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
