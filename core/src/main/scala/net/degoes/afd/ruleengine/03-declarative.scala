@@ -84,7 +84,60 @@ object declarative {
   // Note: argumentation itsnot needed to be serializable becuase condition and action would be serialized
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
-  trait Expression
+  // Note: a recipe that when executed produces a value
+  // 2 * 3
+  // 2 * (3 + 123) / "foo".length
+  // 2 * (3 +123) / scala.io.StdIn.readLine().length
+  //
+  // we can use that to to computation and manipulation inside action and condition
+  // expression can be viewed as a very simple programming language (with out for loops and stuff like that)
+  // a gloryfied calculater
+  //
+  // () => Out
+  // 1 + 2
+  // 1 + Math.pow(2, 3)
+  // scala.io.StdIn.readLine().length() + scala.util.Random.nextInt()
+  // In => Out
+  sealed trait Expr[-In, +Out] { self =>
+    def &&[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
+      Expr.And(self.widen[Boolean], that)
+
+    def ||[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
+      Expr.Or(self.widen[Boolean], that)
+
+    final def ===[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] = Expr.EqualTo(self.widen, that)
+
+    final def <[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] = Expr.LessThan(self, that)
+
+    def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen[Boolean])
+
+    // Note: casting becasue its safe (tm)
+    // John uses this trick instead of going the more verbose Expr.`final case class Widen`
+    def widen[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] = self.asInstanceOf[Expr[In, Out2]]
+
+    // TODO input
+  }
+  object Expr {
+
+    // Note: we can use this to be able  ...
+    // implicit class ExprBoolSyntax[In](self: Expr[In, Boolean])
+    // con and and on types not boolean will not give good error messages
+
+    final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
+    final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
+    final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])  extends Expr[In, Boolean]
+    final case class Not[In](condition: Expr[In, Boolean])                      extends Expr[In, Boolean]
+    final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
+    final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
+    // TODO: division
+    final case class Input[In, Out](tag: PrimitiveType[Out]) extends Expr[In, Out]
+
+    implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
+
+    // Expr(123)
+    // Expr("sdf")
+    // Expr(<something that will no compilole>)
+  }
 
   // Note: ensure the primitive types are in sync with ordering types
   sealed trait PrimitiveType[A] {
@@ -124,6 +177,8 @@ object declarative {
   constrainedPolymorphicFunction("1")
   constrainedPolymorphicFunction(true)
 
+  // In => Boolean
+  // Expr[Boolean]
   sealed trait Condition[-In] { self =>
 
     def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.And(self, that)
@@ -136,12 +191,15 @@ object declarative {
 
   }
   object Condition { self =>
-    final case class Constant(value: Boolean)                                 extends Condition[Any]
-    final case class And[In](left: Condition[In], right: Condition[In])       extends Condition[In]
-    final case class Or[In](left: Condition[In], right: Condition[In])        extends Condition[In]
-    final case class Not[In](condition: Condition[In])                        extends Condition[In]
+    final case class Constant(value: Boolean)                           extends Condition[Any]
+    final case class And[In](left: Condition[In], right: Condition[In]) extends Condition[In]
+    final case class Or[In](left: Condition[In], right: Condition[In])  extends Condition[In]
+    final case class Not[In](condition: Condition[In])                  extends Condition[In]
+    // TODO fix lhs and rhs
     final case class IsEqualTo[In](rhs: In, primitiveType: PrimitiveType[In]) extends Condition[In]
     final case class LessThan[In](rhs: In, primitiveType: PrimitiveType[In])  extends Condition[In]
+
+    final case class Input[In](tag: PrimitiveType[In]) extends Expr[In, In]
 
     // Note: we can not use scala math ordering because its executable encoding
     // scala.math.Ordering
@@ -177,6 +235,8 @@ object declarative {
   // - Promote tier
   // - Send email
   // Outs are kind of instructons that tells us what to do.
+
+  // In => List[Out]
   sealed trait Action[-In, +Out] { self =>
 
     def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
