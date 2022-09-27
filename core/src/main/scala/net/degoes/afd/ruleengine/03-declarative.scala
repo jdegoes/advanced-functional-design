@@ -84,6 +84,26 @@ object declarative {
   // Note: argumentation itsnot needed to be serializable becuase condition and action would be serialized
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
+  sealed trait Numeric[A]
+  object Numeric {
+    implicit case object ByteIsNumeric extends Numeric[Byte]
+    // TODO add the rest
+  }
+
+  object PhantomType101 {
+    // ZIO[Console & Logging & Database & Int & String, Throwable, Unit]
+    // not values of this type... used as guard on compiletime
+    // will thouhg require
+    // Zenvironment[Console & Logging & Database & Int & String]
+
+    final case class Phantom[-In, +Out]()
+    def foo[In, Out](t: Phantom[In, Out]): Phantom[In, Out] = ???
+    // ^^ no requirement of producing in / out
+    // recall we have phantom to track types on compile types
+    //
+    // so we can pass around stuff on compile time with out having the "value in hand"..
+  }
+
   // Note: a recipe that when executed produces a value
   // 2 * 3
   // 2 * (3 + 123) / "foo".length
@@ -98,6 +118,12 @@ object declarative {
   // 1 + Math.pow(2, 3)
   // scala.io.StdIn.readLine().length() + scala.util.Random.nextInt()
   // In => Out
+
+  //
+  //
+  // Note: john suggests to go away from sealed trait Expr[-In, +Out]
+  // to any values of in in memeory or when evaluted Ot so it could be phantom types
+  // ... he suggests using something like a hlist (complicated) or more simply use phantom types to strutuced data
   sealed trait Expr[-In, +Out] { self =>
 
     // TODO slide 50 and so forth check palce
@@ -132,13 +158,9 @@ object declarative {
     // TODO input
   }
 
-  sealed trait Numeric[A]
-  object Numeric {
-    implicit case object ByteIsNumeric extends Numeric[Byte]
-  }
-
   object Expr {
 
+    // Niecetohave screen shoot < 40 elborate on alternative to evidence approach
     // Note: we can use this to be able  ...
     // implicit class ExprBoolSyntax[In](self: Expr[In, Boolean])
     // con and and on types not boolean will not give good error messages
@@ -150,8 +172,7 @@ object declarative {
     final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
     final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
     // Niecetohave: division
-    final case class Input[In, Out](tag: PrimitiveType[Out]) extends Expr[In, Out]
-    // TODO 40
+    final case class Input[In, Out](tag: PrimitiveType[Out])                             extends Expr[In, Out]
     final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
 
     // TODO slide 45 and so forth
@@ -222,7 +243,9 @@ object declarative {
 
     def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(self.expr && that.expr)
 
-    def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(self.expr || that.expr)
+    def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(
+      self.expr || that.expr
+    ) // TODO mention that there is maybe an errro &&
 
     def unary_! : Condition[In] = Condition(!expr)
 
@@ -282,12 +305,17 @@ object declarative {
 
     val statusCondition: Condition[String] = Condition.isEqualTo("confirmed")
 
+    // TODO: goal but filed is unsafe - there is not gurantee that the field status is there
+    // Condition(Expr.field[String]("status") === Expr("confirmed"))
+
     val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
 
     // val statusCondition: Condition[String] =
     //   Condition.isEqualTo("confirmed").contramap[FlightBooking](_.status.toString)
 
     // val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
+
+    // Condition(Expr.field[Double]("price") === Expr(1000.0))
 
     // Note: problem
     val foo: Condition[String with Double] = statusCondition && priceCondition
