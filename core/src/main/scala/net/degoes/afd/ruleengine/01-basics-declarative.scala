@@ -44,7 +44,16 @@ object basicsdeclarative {
 
   trait LoyaltyRule
 
-  trait LoyaltyCondition
+  sealed trait LoyaltyCondition { self =>
+
+    // TODO: how do I get booking and do the evaluation ?
+    def &&(that: LoyaltyCondition): LoyaltyCondition = ???
+    def ||(that: LoyaltyCondition): LoyaltyCondition = ???
+    def unary_! : LoyaltyCondition                   = ???
+  }
+  object LoyaltyCondition {
+    // final case class And(left: LoyaltyCondition, right: LoyaltyCondition) extends LoyaltyCondition
+  }
 
   sealed trait LoyaltyAction { self =>
     def ++(that: LoyaltyAction): LoyaltyAction = LoyaltyAction.Both(self, that)
@@ -83,6 +92,23 @@ object basicsdeclarative {
     case object UpgradeTier                                          extends LoyaltyAction
     case object DowngradeTier                                        extends LoyaltyAction
     final case class Both(left: LoyaltyAction, right: LoyaltyAction) extends LoyaltyAction
+  }
+
+  object example {
+    // val exampleCondition = LoyaltyCondition.status(_ == FlightBookingStatus.Confirmed) &&
+    //   LoyaltyCondition.price(_ > 1000)
+
+    // val exampleAction = LoyaltyAction.upgradeTier ++ LoyaltyAction.adjustPoints(100)
+
+    // val exampleRule = LoyaltyRule(exampleCondition, exampleAction)
+
+    // val exampleRuleSet = LoyaltyRuleSet(Vector(exampleRule))
+
+    // val engine = LoyaltyEngine.fromRuleSet(exampleRuleSet)
+
+    // def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram =
+    //   engine.update(booking, program)
+
   }
 
 }

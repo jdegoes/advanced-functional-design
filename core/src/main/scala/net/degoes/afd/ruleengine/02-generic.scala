@@ -23,12 +23,24 @@ import net.degoes.afd.examples.loyalty.LoyaltyTier.Silver
  */
 object generic {
 
+  sealed trait Json
+  object Json {
+    final case class String(value: String)            extends Json
+    final case class Number(value: Double)            extends Json
+    final case class Boolean(value: Boolean)          extends Json
+    final case class Array(value: List[Json])         extends Json
+    final case class Object(value: Map[String, Json]) extends Json
+    case object Null                                  extends Json
+  }
+
   // Nicetohave: Out => Action (would require the existing Action to be renamed)
   final case class RuleEngine[In, Out](update: In => Option[List[Out]]) { self =>
 
     // Niecetohave: impl  >>> and contramap
     // def >>>[Out2](that: RuleEngine[Out, Out2]): RuleEngine[In, Out2] =
     //   RuleEngine[In, Out2](in => self.update(in).flatMap(that.update))
+
+    def contramap[In2](f: In2 => In): RuleEngine[In2, Out] = RuleEngine(in2 => self.update(f(in2)))
 
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
       RuleEngine[In1, Out1](in => self.update(in).orElse(that.update(in)))
@@ -54,6 +66,15 @@ object generic {
 
   }
 
+  // {"rules": [{"condition": ???, "action": ???}]}
+  // n rules
+  // m atoms per condition
+  // O(n * m) - bad for performance, worst case secanrio
+  //
+  // bad performance comes from executable encoding and the fatch we have Vector[Rule[In, Out]]
+  //
+  // challenges which rule does match
+  // for some programs not a problem but cloud be a problem for ecommerce
   final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
 
     def ++[In1 <: In, Out1 >: Out](that: RuleSet[In1, Out1]): RuleSet[In1, Out1] = RuleSet(self.rules ++ that.rules)
@@ -95,6 +116,9 @@ object generic {
     val always: Condition[Any]                      = constant(true)
     val never: Condition[Any]                       = constant(false)
     def constant[In](value: Boolean): Condition[In] = Condition(_ => value)
+
+    // TODO aff from Function
+
   }
 
   final case class Action[-In, +Out](update: In => List[Out]) { self =>
