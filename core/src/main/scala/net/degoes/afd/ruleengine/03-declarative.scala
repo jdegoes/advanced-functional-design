@@ -117,41 +117,12 @@ object declarative {
     }
   }
 
-  // Note: poof constrain types
+  // Note: proof constrain types
   def constrainedPolymorphicFunction[A](a: A)(implicit pt: PrimitiveType[A]): A = a
 
   constrainedPolymorphicFunction(1)
   constrainedPolymorphicFunction("1")
   constrainedPolymorphicFunction(true)
-
-  // TODO spelling
-  // Declarative encoding of the concept of orderability
-  sealed trait Ordering[A] extends scala.math.Ordering[A] {
-    private val delegate: scala.math.Ordering[A] = Ordering.toScalaOrdering(this)
-
-    def compare(x: A, y: A): Int = delegate.compare(x, y)
-  }
-  object Ordering {
-    implicit case object IntOrdering     extends Ordering[Int]
-    implicit case object LongOrdering    extends Ordering[Long]
-    implicit case object DoubleOrdering  extends Ordering[Double]
-    implicit case object FloatOrdering   extends Ordering[Float]
-    implicit case object StringOrdering  extends Ordering[String]
-    implicit case object BooleanOrdering extends Ordering[Boolean]
-    implicit case object ByteOrdering    extends Ordering[Byte]
-    implicit case object CharOrdering    extends Ordering[Char]
-
-    def toScalaOrdering[A](ord: Ordering[A]): scala.math.Ordering[A] = ord match {
-      case IntOrdering     => scala.math.Ordering[Int]
-      case LongOrdering    => scala.math.Ordering[Long]
-      case DoubleOrdering  => scala.math.Ordering[Double]
-      case FloatOrdering   => scala.math.Ordering[Float]
-      case StringOrdering  => scala.math.Ordering[String]
-      case BooleanOrdering => scala.math.Ordering[Boolean]
-      case ByteOrdering    => scala.math.Ordering[Byte]
-      case CharOrdering    => scala.math.Ordering[Char]
-    }
-  }
 
   sealed trait Condition[-In] { self =>
 
@@ -183,12 +154,12 @@ object declarative {
     def constant[In](value: Boolean): Condition[In] = Constant(value)
 
     def eval[In](condition: Condition[In])(in: In): Boolean = condition match {
-      case Constant(value)    => value
-      case And(left, right)   => eval(left)(in) && eval(right)(in)
-      case Or(left, right)    => eval(left)(in) || eval(right)(in)
-      case Not(condition)     => !eval(condition)(in)
-      case IsEqualTo(rhs, pt) => pt.ordering.compare(in, rhs) == 0
-      case LessThan(rhs, pt)  => pt.ordering.compare(in, rhs) < 0
+      case Constant(value)     => value
+      case And(left, right)    => eval(left)(in) && eval(right)(in)
+      case Or(left, right)     => eval(left)(in) || eval(right)(in)
+      case Not(condition)      => !eval(condition)(in)
+      case IsEqualTo(rhs, tag) => tag.ordering.compare(in, rhs) == 0
+      case LessThan(rhs, tag)  => tag.ordering.compare(in, rhs) < 0
     }
 
     def isEqualTo[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = IsEqualTo(in, tag)
@@ -218,9 +189,9 @@ object declarative {
   object Action { self =>
     final case class Concat[In, Out1, Out2](left: Action[In, Out1], right: Action[In, Out2]) extends Action[In, Out2]
     final case class Pipe[In, Out1, Out2](left: Action[In, Out1], right: Action[Out1, Out2]) extends Action[In, Out2]
-    final case class Constant[Out](value: Out, pt: PrimitiveType[Out])                       extends Action[Any, Out]
+    final case class Constant[Out](value: Out, tag: PrimitiveType[Out])                      extends Action[Any, Out]
 
-    def constant[Out](out: Out)(implicit pt: PrimitiveType[Out]): Action[Any, Out] = Constant(out, pt)
+    def constant[Out](out: Out)(implicit tag: PrimitiveType[Out]): Action[Any, Out] = Constant(out, tag)
   }
 
   object loyalty {
