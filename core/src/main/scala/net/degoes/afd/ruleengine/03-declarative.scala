@@ -108,19 +108,11 @@ object declarative {
     }
   }
 
-  sealed trait Getter[-Whole, +Part] {
-    def get(whole: Whole): Part = ???
-  }
-
   sealed trait Condition[-In] { self =>
 
     def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.And(self, that)
 
     def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.Or(self, that)
-
-    // Note: in this form will not work due to serialization
-    // def contramap[In2](f: In2 => In): Condition[In2] = ???
-    def contramap[In2](getter: Getter[In2, In]): Condition[In2] = ???
 
     def eval(in: In): Boolean = Condition.eval(self)(in)
 
@@ -168,14 +160,14 @@ object declarative {
 
   object loyalty {
 
-    // val statusCondition: Condition[String] = Condition.isEqualTo("confirmed")
-
-    // val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
-
-    val statusCondition: Condition[String] =
-      Condition.isEqualTo("confirmed").contramap[FlightBooking](Getter.Field[FlightBooking, String]("status"))
+    val statusCondition: Condition[String] = Condition.isEqualTo("confirmed")
 
     val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
+
+    // val statusCondition: Condition[String] =
+    //   Condition.isEqualTo("confirmed").contramap[FlightBooking](_.status.toString)
+
+    // val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
 
     // Note: problem
     val foo: Condition[String with Double] = statusCondition && priceCondition
