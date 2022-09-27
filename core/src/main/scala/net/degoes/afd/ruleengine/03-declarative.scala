@@ -145,7 +145,6 @@ object declarative {
     val testRecord2: TestRecord2 = testRecord.add(street, "Main Street")
 
     testRecord2.get(street)
-
   }
 
   object PhantomType101 {
@@ -169,8 +168,8 @@ object declarative {
   // 2 * (3 +123) / scala.io.StdIn.readLine().length
   //
   // we can use that to to computation and manipulation inside action and condition
-  // expression can be viewed as a very simple programming language (with out for loops and stuff like that)
-  // a gloryfied calculater
+  // expression can be viewed as a very simple programming language (without for loops and stuff like that)
+  // a `glorified` calculator
   //
   // () => Out
   // 1 + 2
@@ -179,10 +178,9 @@ object declarative {
   // In => Out
 
   //
-  //
   // Note: john suggests to go away from sealed trait Expr[-In, +Out]
-  // to any values of In in memeory or when evaluted Out so it could be phantom types
-  // ... he suggests using hlist (complicated) or more simply use phantom types to solve the strutuced data problem
+  // to any values of In in memory or when evaluated Out so it could be phantom types
+  // ... he suggests using hlist (complicated) or more simply use phantom types to solve the structured data problem
   sealed trait Expr[-In, +Out] { self =>
 
     final def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
@@ -221,17 +219,16 @@ object declarative {
 
     def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen[Boolean])
 
-    // Note: casting becasue its safe (tm)
+    // Note: casting because its safe (tm)
     // John uses this trick instead of going the more verbose Expr.`final case class Widen`
     def widen[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] = self.asInstanceOf[Expr[In, Out2]]
   }
 
   object Expr {
 
-    // Niecetohave screen shoot < 40 elborate on alternative to evidence approach
-    // Note: we can use this to be able  ...
+    // Note: the current evidence approach could have been implemented with roughly
     // implicit class ExprBoolSyntax[In](self: Expr[In, Boolean])
-    // con and and on types not boolean will not give good error messages
+    // con that one do not give good error messages when `and and` on types not boolean
 
     final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
     final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
@@ -321,7 +318,7 @@ object declarative {
 
     // Note: we can not use scala math ordering because its executable encoding
     // scala.math.Ordering
-    // becasue we want declarative encoding
+    // because we want declarative encoding
 
     val always: Condition[Any] = constant(true)
 
@@ -341,12 +338,12 @@ object declarative {
     // Note: fromFunction can not be solved due to serialization
   }
 
-  // Recap actions: LoyalyAction is pure data - think of Out as pure data do not need to be fancy liek a function
+  // Recap actions: LoyalyAction is pure data - think of Out as pure data do not need to be fancy like a function
   // think commands
   // - Add points
   // - Promote tier
   // - Send email
-  // Outs are kind of instructons that tells us what to do.
+  // Outs are kind of instructions that tell us what to do.
 
   // In => NonEmptyList[Out]
   sealed trait Action[-In, +Out] { self =>
@@ -371,9 +368,9 @@ object declarative {
   object loyalty {
 
     // Note:
-    // FlightBookStatus is not a type in Our world ... it would need soe adjustments of `object Ordering {`
+    // FlightBookStatus is not a type in Our world ... it would need some adjustments of `object Ordering {`
     //    case class Ordering2[A, B](orderingA: Ordering[A], orderingB: Ordering[B]) extends Ordering[(A, B)]
-    // John do not recommend to go down this path now ...
+    // John does not recommend going down this path now ...
 
     import net.degoes.afd.examples.loyalty._
     import net.degoes.afd.examples.loyalty.LoyaltyTier._
