@@ -23,26 +23,19 @@ import net.degoes.afd.examples.loyalty.LoyaltyTier.Silver
  */
 object generic {
 
-  // TODO try to rename Out to Action
-  // prestep rename already exsiting Action to something
+  final case class RuleEngine[In, Out](update: In => Option[List[Out]]) { self =>
 
-  // TODO: change In => Option[Out]
-  // to In => Option[List[Out]]
-  // `Option[List[Out]]` used for orElse
-  final case class RuleEngine[In, Out](update: In => Option[Out]) { self =>
-
-    // TODO: check screen
-    def >>>[Out2](that: RuleEngine[Out, Out2]): RuleEngine[In, Out2] =
-      RuleEngine[In, Out2](in => self.update(in).flatMap(that.update))
+    // Niecetohave: impl  >>> and contramap
+    // def >>>[Out2](that: RuleEngine[Out, Out2]): RuleEngine[In, Out2] =
+    //   RuleEngine[In, Out2](in => self.update(in).flatMap(that.update))
 
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
       RuleEngine[In1, Out1](in => self.update(in).orElse(that.update(in)))
 
-    // add +/- types
-    // def updateWith(defaultOut: Out, combine: (Out, Out) => Out): Out = self.update(in) match {
-    //   case None => defaultOut
-    //   case Some(outs) => ???
-    // }
+    def updateWith[Out1 >: Out](in: In)(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 = self.update(in) match {
+      case None       => defaultOut
+      case Some(outs) => outs.reduceOption(combine).getOrElse(defaultOut)
+    }
 
   }
 
@@ -50,7 +43,10 @@ object generic {
 
     val empty: RuleEngine[Any, Nothing] = RuleEngine(_ => None)
 
-    def constant[Out](out: Out): RuleEngine[Any, Out] = RuleEngine(_ => Some(out))
+    def collect[In, Out](pf: PartialFunction[In, Out]): RuleEngine[In, Out] =
+      RuleEngine(in => pf.lift(in).map(List(_)))
+
+    def constant[Out](out: List[Out]): RuleEngine[Any, Out] = RuleEngine(_ => Some(out))
 
     def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] =
       RuleEngine(ruleSet.update)
@@ -66,10 +62,12 @@ object generic {
     def addRule[In1 <: In, Out1 >: Out](that: Rule[In1, Out1]) = self + that
 
     // Note: has to be option because we might not produce anything
-    def update(in: In): Option[Out] = self.rules.find(_.condition.eval(in)).map(rule => rule.action.update(in))
+    def update(in: In): Option[List[Out]] = self.rules.find(_.condition.eval(in)).map(rule => rule.action.update(in))
 
   }
   object RuleSet {
+    def apply[In, Out](rule1: Rule[In, Out], rules: Rule[In, Out]*): RuleSet[In, Out] = RuleSet(rule1 +: rules.toVector)
+
     def empty[In, Out]: RuleSet[In, Out] = RuleSet(Vector.empty)
   }
 
@@ -77,18 +75,13 @@ object generic {
 
   final case class Condition[-In](eval: In => Boolean) { self =>
 
-    // TODO check with screen its copilot stuff
-    // In1 related to In
     def &&[In1 <: In](that: Condition[In1]): Condition[In1] =
-      Condition[In1](in => self.eval(in) && that.eval(in))
+      Condition(in => self.eval(in) && that.eval(in))
 
-    // TODO check with screen its copilot stuff
     def ||[In1 <: In](that: Condition[In1]): Condition[In1] =
-      Condition[In1](in => self.eval(in) || that.eval(in))
+      Condition(in => self.eval(in) || that.eval(in))
 
-    // TODO check with screen its copilot stuff
-
-    // In2 is used a convention not related to In
+    // Note: In2 is used a convention not related to In. In1 is related to In
     def contramap[In2](f: In2 => In): Condition[In2] =
       Condition(in2 => self.eval(f(in2)))
 
@@ -96,32 +89,27 @@ object generic {
 
   }
 
-  // we can not write status and price because they are domain specific
+  // Note: we can not write status and price because they are domain specific
   object Condition {
     val always: Condition[Any]                      = constant(true)
     val never: Condition[Any]                       = constant(false)
     def constant[In](value: Boolean): Condition[In] = Condition(_ => value)
   }
 
-// Note: recall
-// only in -
-// only out +
-// to improve type inference
-  final case class Action[-In, +Out](update: In => Out) { self =>
+  final case class Action[-In, +Out](update: In => List[Out]) { self =>
 
-    def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] = ???
-//
-//      Action(in =? update(in))
+    def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
+      Action(in => self.update(in) ++ that.update(in))
 
     def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] =
-      Action(in => that.update(update(in)))
+      Action(in => update(in).flatMap(that.update))
 
     def contramap[In2](f: In2 => In): Action[In2, Out] =
       Action.fromFunction(f) >>> self
 
-    // needed to have the actions in a for comprehension
+    // Note: needed to have the actions in a for comprehension
     def flatMap[In1 <: In, Out2](f: Out => Action[In1, Out2]): Action[In1, Out2] =
-      Action(in => f(self.update(in)).update(in))
+      Action(in => self.update(in).flatMap(out => f(out).update(in)))
 
     def map[Out2](f: Out => Out2): Action[In, Out2] =
       self.flatMap(out => Action.constant(f(out)))
@@ -131,23 +119,9 @@ object generic {
 
   }
   object Action {
-    def constant[Out](out: Out): Action[Any, Out] = Action(_ => out)
+    def constant[Out](out: Out): Action[Any, Out] = fromFunction(_ => out)
 
-    def fromFunction[In, Out](f: In => Out): Action[In, Out] = Action(f)
-
-    constant(42): Action[String, Int]
-
-    // contra variance ... co variance
-    // variant versus invariant
-    // variance enables subtyping on generic data types
-    // more on variance https://www.youtube.com/watch?v=aUmj7jnXet4
-
-    trait Animal
-    trait Dog extends Animal
-
-    def bar(action: Action[Dog, _])    = ???
-    def foo(action: Action[Animal, _]) = bar(action)
-
+    def fromFunction[In, Out](f: In => Out): Action[In, Out] = Action(in => List(f(in)))
   }
 
   /**
@@ -163,17 +137,13 @@ object generic {
     // Note: its an updater that simply updates a
     type Patch[A] = A => A
 
-    type LoyaltyEngine = RuleEngine[(FlightBooking, LoyaltyProgram), Patch[LoyaltyProgram]]
+    type LoyaltyEngine = RuleEngine[FlightBooking, Patch[LoyaltyProgram]]
 
-    type LoyaltyRuleSet = RuleSet[(FlightBooking, LoyaltyProgram), LoyaltyProgram]
+    type LoyaltyRuleSet = RuleSet[FlightBooking, Patch[LoyaltyProgram]]
 
-    type LoyaltyRule = Rule[(FlightBooking, LoyaltyProgram), LoyaltyProgram]
+    type LoyaltyRule = Rule[FlightBooking, Patch[LoyaltyProgram]]
     object LoyaltyRule {
-      def apply(condition: LoyaltyCondition, action: LoyaltyAction): LoyaltyRule = ???
-
-      // Rule(condition, action)
-      // TODO get to work ???
-//        Rule(condition.contramap(_._1), action.contramap(_._2))
+      def apply(condition: LoyaltyCondition, action: LoyaltyAction): LoyaltyRule = Rule(condition, action)
     }
 
     type LoyaltyCondition = Condition[FlightBooking]
@@ -181,13 +151,11 @@ object generic {
       def status(f: FlightBookingStatus => Boolean): LoyaltyCondition = Condition(booking => f(booking.status))
       def price(f: Double => Boolean): LoyaltyCondition               = Condition(booking => f(booking.price))
     }
-    // type LoyaltyAction = Action[LoyaltyProgram, LoyaltyProgram]
     type LoyaltyAction = Action[Any, Patch[LoyaltyProgram]]
     object LoyaltyAction {
-      // def apply(f: LoyaltyProgram => LoyaltyProgram): LoyaltyAction = Action(f)
-      def apply(f: LoyaltyProgram => LoyaltyProgram): LoyaltyAction = Action(_ => f)
+      def apply(patch: LoyaltyProgram => LoyaltyProgram): LoyaltyAction = Action.constant(patch)
 
-      def adjustPoint(value: Int): LoyaltyAction =
+      def adjustPoints(value: Int): LoyaltyAction =
         LoyaltyAction(program => program.copy(points = program.points + value))
 
       val downgradeTier: LoyaltyAction = LoyaltyAction(program =>
@@ -215,8 +183,8 @@ object generic {
       val exampleCondition = LoyaltyCondition.status(_ == FlightBookingStatus.Confirmed) &&
         LoyaltyCondition.price(_ > 1000)
 
-      // note: debate >>> versus ++, >>> compiles but is incorrect because of ...
-      val exampleAction = LoyaltyAction.upgradeTier // ++ LoyaltyAction.adjustPoints(100)
+      // note: debate >>> versus ++, >>> did compile in an aerly version but is incorrect because of ...
+      val exampleAction = LoyaltyAction.upgradeTier ++ LoyaltyAction.adjustPoints(100)
 
       val exampleRule = LoyaltyRule(exampleCondition, exampleAction)
 
@@ -224,12 +192,12 @@ object generic {
 
       val engine = RuleEngine.fromRuleSet(exampleRuleSet)
 
-      def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram =
-        engine.update(booking -> program).getOrElse(program)
+      def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram = {
+        val empty = identity[LoyaltyProgram](_)
+        val patch = engine.updateWith(booking)(empty, _ andThen _)
 
-      // val identityPatch = identity[LoyaltyProgram](_)
-      // engine.update(booking).getOrElse
-
+        patch(program)
+      }
     }
 
   }
