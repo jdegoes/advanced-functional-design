@@ -14,8 +14,6 @@
  */
 package net.degoes.afd.ruleengine
 
-import net.degoes.afd.ruleengine.declarative.PrimitiveType.StringOrdering
-
 import scala.language.implicitConversions
 
 /**
@@ -76,20 +74,140 @@ object declarative {
   }
 
   object RuleSet {
-    def apply[In, Out](rule1: Rule[In, Out], rules: Rule[In, Out]*): RuleSet[In, Out] = RuleSet(rule1 +: rules.toVector)
+    def apply[In, Out](rule1: Rule[In, Out], rules: Rule[In, Out]*): RuleSet[In, Out] =
+      RuleSet(rule1 +: rules.toVector)
 
     val empty: RuleSet[Any, Nothing] = RuleSet(Vector.empty)
   }
 
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
-  sealed trait Expression[-In, +Out]
+  sealed trait Numeric[+A]
 
-  object Expression {
-    final case class Constant[Out](value: Out, pt: PrimitiveType[Out]) extends Expression[Any, Out]
+  object Numeric {
+    case object IntNumeric    extends Numeric[Int]
+    case object LongNumeric   extends Numeric[Long]
+    case object ShortNumeric  extends Numeric[Short]
+    case object ByteNumeric   extends Numeric[Byte]
+    case object CharNumeric   extends Numeric[Char]
+    case object FloatNumeric  extends Numeric[Float]
+    case object DoubleNumeric extends Numeric[Double]
+  }
 
-    implicit def apply[Out](value: Out)(implicit pt: PrimitiveType[Out]): Expression[Any, Out] =
+  sealed trait Expr[-In, +Out] { self =>
+    def &&[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
+      Expr.And(self.widen, that)
+
+    def ||[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
+      Expr.Or(self.widen, that)
+
+    def ===[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      Expr.EqualTo(self.widen, that)
+
+    def !=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      !(self === that)
+
+    def <[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      Expr.LessThan(self.widen, that)
+
+    def <=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      (self.widen < that) || (self === that)
+
+    def >[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      !(self <= that)
+    def >=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+      !(self < that)
+
+    def *[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Multiply, numeric)
+
+    def /[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Divide, numeric)
+
+    def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Add, numeric)
+
+    def -[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Subtract, numeric)
+
+    def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen)
+
+    def widen[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] =
+      self.asInstanceOf[Expr[In, Out2]]
+  }
+
+  object Generic {
+    import zio.Chunk
+    final case class FieldSpec[A](name: String, fieldType: PrimitiveType[A]) {
+      type Type
+    }
+
+    object FieldSpec {
+      // lifts the path dependent type to a type parameter
+      type WithFieldType[A, B] = FieldSpec[A] { type Type = B }
+    }
+
+    val age    = FieldSpec("age", PrimitiveType.IntType)
+    val name   = FieldSpec("name", PrimitiveType.StringType)
+    val street = FieldSpec("street", PrimitiveType.StringType)
+    val isMale = FieldSpec("isMale", PrimitiveType.BooleanType)
+
+    def testEquality[A, B](l: FieldSpec.WithFieldType[A, B], r: FieldSpec.WithFieldType[A, B]): Unit =
+      () //l.name == r.name && l.fieldType == r.fieldType
+    final case class Field[A](fieldSpec: FieldSpec[A], value: A)
+
+    sealed trait Record[Fields] { self =>
+      def values: Chunk[Any]
+
+      def add[A](fs: FieldSpec[A], value: A): Record[Fields with A] =
+        new Record[Fields with A] {
+          def values: Chunk[Any] = self.values :+ value
+        }
+
+      def getInt(implicit ev: Fields <:< Int): Int =
+        values.collect { case i: Int => i }.head
+    }
+    object Record {
+      def empty: Record[Any] = new Record[Any] {
+        def values: Chunk[Any] = Chunk.empty
+      }
+    }
+
+    Record.empty.add(age, 42).add(name, "John").add(isMale, true)
+  }
+
+  object Expr {
+    final case class Constant[Out](value: Out, pt: PrimitiveType[Out]) extends Expr[Any, Out]
+
+    final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
+
+    final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])    extends Expr[In, Boolean]
+    final case class Not[In](condition: Expr[In, Boolean])                        extends Expr[In, Boolean]
+    final case class EqualTo[In, Out](left: Expr[In, Out], right: Expr[In, Out])  extends Expr[In, Boolean]
+    final case class LessThan[In, Out](left: Expr[In, Out], right: Expr[In, Out]) extends Expr[In, Boolean]
+    final case class Identity[In](pt: PrimitiveType[In])                          extends Expr[In, In]
+
+    final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
+    final case class BinaryNumericOp[In, Out](
+      left: Expr[In, Out],
+      right: Expr[In, Out],
+      op: NumericBinOpType,
+      pt: Numeric[Out]
+    ) extends Expr[In, Out]
+
+    sealed trait NumericBinOpType
+    object NumericBinOpType {
+      case object Add      extends NumericBinOpType
+      case object Subtract extends NumericBinOpType
+      case object Multiply extends NumericBinOpType
+      case object Divide   extends NumericBinOpType
+      case object Modulo   extends NumericBinOpType
+    }
+
+    implicit def apply[Out](value: Out)(implicit pt: PrimitiveType[Out]): Expr[Any, Out] =
       Constant(value, pt)
+
+    def input[In](implicit pt: PrimitiveType[In]): Expr[In, In] = Identity(pt)
   }
 
   sealed trait PrimitiveType[A] {
@@ -128,48 +246,32 @@ object declarative {
       override def ordering: Ordering[Char] = Ordering.Char
     }
 
-    implicit case object StringOrdering extends PrimitiveType[String] {
+    implicit case object StringType extends PrimitiveType[String] {
       override def ordering: Ordering[String] = Ordering.String
     }
 
   }
 
-  sealed trait Condition[-In] { self =>
-    def &&[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.And(self, that)
-    def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition.Or(self, that)
-    def unary_! : Condition[In]                             = Condition.Not(self)
+  final case class Condition[-In](expr: Expr[In, Boolean]) { self =>
+    def &&[In1 <: In](that: Condition[In1]): Condition[In1] =
+      Condition(self.expr && that.expr)
 
-    def eval(in: In): Boolean =
-      Condition.eval(self)(in)
+    def ||[In1 <: In](that: Condition[In1]): Condition[In1] =
+      Condition(self.expr || that.expr)
   }
   object Condition {
-    final case class Constant(value: Boolean)                           extends Condition[Any]
-    final case class And[In](left: Condition[In], right: Condition[In]) extends Condition[In]
-    final case class Or[In](left: Condition[In], right: Condition[In])  extends Condition[In]
-    final case class Not[In](condition: Condition[In])                  extends Condition[In]
-    final case class EqualTo[In](rhs: In, ordering: PrimitiveType[In])  extends Condition[In]
-    final case class LessThan[In](rhs: In, ordering: PrimitiveType[In]) extends Condition[In]
 
-    def constant(value: Boolean): Condition[Any] = Constant(value)
-    val always: Condition[Any]                   = Constant(true)
-    val never: Condition[Any]                    = Constant(false)
-    def isEqualTo[In](value: In)(implicit ordering: PrimitiveType[In]): Condition[In] =
-      EqualTo(value, ordering)
+    val always: Condition[Any] = Condition(Expr(value = true))
+    val never: Condition[Any]  = Condition(Expr(value = false))
+    def isEqualTo[In](value: In)(implicit pt: PrimitiveType[In]): Condition[In] =
+      Condition(Expr(value) === Expr.input[In])
 
-    def isLessThan[In](value: In)(implicit ordering: PrimitiveType[In]): Condition[In] =
-      LessThan(value, ordering)
+    def isLessThan[In](value: In)(implicit pt: PrimitiveType[In]): Condition[In] =
+      Condition(Expr.input[In] < Expr(value))
 
-    def isGreaterThan[In](value: In)(implicit ordering: PrimitiveType[In]): Condition[In] =
-      Not(isLessThan(value) || isEqualTo(value))
+    def isGreaterThan[In](value: In)(implicit pt: PrimitiveType[In]): Condition[In] =
+      Condition(Expr.input[In] > Expr(value))
 
-    def eval[In](condition: Condition[In])(in: In): Boolean = condition match {
-      case Constant(value)         => value
-      case And(left, right)        => eval(left)(in) && eval(right)(in)
-      case Or(left, right)         => eval(left)(in) || eval(right)(in)
-      case Not(condition)          => !eval(condition)(in)
-      case EqualTo(rhs, ordering)  => ordering.ordering.compare(in, rhs) == 0
-      case LessThan(rhs, ordering) => ordering.ordering.compare(in, rhs) < 0
-    }
   }
 
   sealed trait Action[-In, +Out] {
