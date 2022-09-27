@@ -87,37 +87,80 @@ object declarative {
     implicit case object DoubleIsNumeric extends Numeric[Double]
   }
 
-  // TODO: slide 60
   // Note: some type level hands on
-  object Generic {
-    final case class FieldSpec[A](name: String, fieldType: PrimitiveType[A])
+  object GenericTypeLevel101 {
 
-    final case class Field[A](fieldSpec: FieldSpec[A], value: A)
+    import PrimitiveType._
 
-    // Note: we never value of fields exist
-    sealed trait Record[+Fields] {
-      def values: Chunk[Any]
+    sealed abstract case class FieldSpec[A](name: String, fieldType: PrimitiveType[A]) {
+      type Type
+    }
+    object FieldSpec {
+      def apply[A](name: String)(implicit tag: PrimitiveType[A]): FieldSpec[A] =
+        new FieldSpec(name, tag) {}
 
-      def add[A](fs: FieldSpec[A], value: A): Record[Fields with A] = ???
+      type WithFieldType[A, B] = FieldSpec[A] { type Type = B }
+    }
+
+    val age =
+      FieldSpec[Int]("age")(PrimitiveType.IntType) // TODO should be possible to leave out the implicit arguments
+    val name   = FieldSpec[String]("name")(PrimitiveType.StringType)
+    val street = FieldSpec[String]("street")(PrimitiveType.StringType)
+    val isMale = FieldSpec[Boolean]("isMale")(PrimitiveType.BooleanType)
+
+    // Note:  value of fields exist, its a phantom type
+    final class Record[+Fields] private (val map: Map[FieldSpec[_], Any]) { self =>
+
+      def ++[Fields2](that: Record[Fields2]): Record[Fields with Fields2] =
+        new Record(self.map ++ that.map)
+
+      def add[A](fs: FieldSpec[A], value: A): Record[Fields with (fs.Type, A)] =
+        new Record(self.map.updated(fs, value))
+
+      def get[A](fs: FieldSpec[A])(implicit ev: Fields <:< (fs.Type, A)): A =
+        self.map(fs).asInstanceOf[A]
+
+      def updateWith[A](fs: FieldSpec[A], f: A => A)(implicit ev: Fields <:< (fs.Type, A)): Record[Fields] =
+        add(fs, f(self.get(fs)))
     }
     object Record {
-      val empty: Record[Any] = ???
+      val empty: Record[Any] = new Record(Map())
     }
+
+    // Note: types are here for docs, would be infered...
+
+    type TestRecord1 = Record[(age.Type, Int) with (name.Type, String) with (isMale.Type, Boolean)]
+
+    val testRecord: TestRecord1 = Record.empty
+      .add(age, 42)
+      .add(name, "John")
+      .add(isMale, true)
+
+    // Do not compile as expected (tm)
+    // testRecord.get(street)
+
+    type TestRecord2 =
+      Record[(age.Type, Int) with (name.Type, String) with (street.Type, String) with (isMale.Type, Boolean)]
+
+    val testRecord2: TestRecord2 = testRecord.add(street, "Main Street")
+
+    testRecord2.get(street)
 
   }
 
   object PhantomType101 {
+    // Note: recap phantom type used in ZIO like
     // ZIO[Console & Logging & Database & Int & String, Throwable, Unit]
-    // not values of this type... used as guard on compiletime
-    // will thouhg require
-    // Zenvironment[Console & Logging & Database & Int & String]
+    // no values of this type... used as guard on compile time
+    // will though require
+    // ZEnvironment[Console & Logging & Database & Int & String]
 
     final case class Phantom[-In, +Out]()
     def foo[In, Out](t: Phantom[In, Out]): Phantom[In, Out] = ???
-    // ^^ no requirement of producing in / out
+    // ^^ no requirement of producing In / Out
     // recall we have phantom to track types on compile types
     //
-    // so we can pass around stuff on compile time with out having the "value in hand"..
+    // so we can pass around stuff on compile time without having the "value in hand"..
   }
 
   // Note: a recipe that when executed produces a value
@@ -219,6 +262,8 @@ object declarative {
     implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
 
     def input[A](implicit tag: PrimitiveType[A]): Expr[A, A] = Input(tag)
+
+    def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ??? // TODO
   }
 
   // Note: ensure the primitive types are in sync with ordering types
