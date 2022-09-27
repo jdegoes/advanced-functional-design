@@ -86,6 +86,25 @@ object declarative {
 
   trait Expression
 
+  sealed trait PrimitiveType[A]
+  object PrimitiveType {
+    implicit case object BooleanType extends PrimitiveType[Boolean]
+    implicit case object ByteType    extends PrimitiveType[Byte]
+    implicit case object CharType    extends PrimitiveType[Char]
+    implicit case object IntType     extends PrimitiveType[Int]
+    implicit case object LongType    extends PrimitiveType[Long]
+    implicit case object FloatType   extends PrimitiveType[Float]
+    implicit case object DoubleType  extends PrimitiveType[Double]
+    implicit case object StringType  extends PrimitiveType[String]
+  }
+
+  // Note: poof constrain types
+  def constrainedPolymorphicFunction[A](a: A)(implicit pt: PrimitiveType[A]): A = a
+
+  constrainedPolymorphicFunction(1)
+  constrainedPolymorphicFunction("1")
+  constrainedPolymorphicFunction(true)
+
   // TODO spelling
   // Declarative encoding of the concept of orderability
   sealed trait Ordering[A] extends scala.math.Ordering[A] {
@@ -94,17 +113,24 @@ object declarative {
     def compare(x: A, y: A): Int = delegate.compare(x, y)
   }
   object Ordering {
-    implicit case object IntOrdering    extends Ordering[Int]
-    implicit case object LongOrdering   extends Ordering[Long]
-    implicit case object DoubleOrdering extends Ordering[Double]
-    implicit case object StringOrdering extends Ordering[String]
-    // TODO add more Byte, Char, Boolean, etc.
+    implicit case object IntOrdering     extends Ordering[Int]
+    implicit case object LongOrdering    extends Ordering[Long]
+    implicit case object DoubleOrdering  extends Ordering[Double]
+    implicit case object FloatOrdering   extends Ordering[Float]
+    implicit case object StringOrdering  extends Ordering[String]
+    implicit case object BooleanOrdering extends Ordering[Boolean]
+    implicit case object ByteOrdering    extends Ordering[Byte]
+    implicit case object CharOrdering    extends Ordering[Char]
 
     def toScalaOrdering[A](ord: Ordering[A]): scala.math.Ordering[A] = ord match {
-      case IntOrdering    => scala.math.Ordering[Int]
-      case LongOrdering   => scala.math.Ordering[Long]
-      case DoubleOrdering => scala.math.Ordering[Double]
-      case StringOrdering => scala.math.Ordering[String]
+      case IntOrdering     => scala.math.Ordering[Int]
+      case LongOrdering    => scala.math.Ordering[Long]
+      case DoubleOrdering  => scala.math.Ordering[Double]
+      case FloatOrdering   => scala.math.Ordering[Float]
+      case StringOrdering  => scala.math.Ordering[String]
+      case BooleanOrdering => scala.math.Ordering[Boolean]
+      case ByteOrdering    => scala.math.Ordering[Byte]
+      case CharOrdering    => scala.math.Ordering[Char]
     }
   }
 
@@ -173,9 +199,9 @@ object declarative {
   object Action { self =>
     final case class Concat[In, Out1, Out2](left: Action[In, Out1], right: Action[In, Out2]) extends Action[In, Out2]
     final case class Pipe[In, Out1, Out2](left: Action[In, Out1], right: Action[Out1, Out2]) extends Action[In, Out2]
-    final case class Constant[Out](value: Out)                                               extends Action[Any, Out]
+    final case class Constant[Out](value: Out, pt: PrimitiveType[Out])                       extends Action[Any, Out]
 
-    def constant[Out](out: Out): Action[Any, Out] = Constant(out)
+    def constant[Out](out: Out)(implicit pt: PrimitiveType[Out]): Action[Any, Out] = Constant(out, pt)
   }
 
   object loyalty {
