@@ -14,8 +14,9 @@
  */
 package net.degoes.afd.ruleengine
 
-import net.degoes.afd.examples.loyalty._
-import net.degoes.afd.examples.loyalty.LoyaltyTier._
+import zio.Chunk
+
+import scala.language.implicitConversions
 
 /**
  * Develop a fully declarative encoding of a rule engine. You are NOT allowed to
@@ -29,19 +30,11 @@ import net.degoes.afd.examples.loyalty.LoyaltyTier._
  */
 object declarative {
 
-  sealed trait Json
-  object Json {
-    final case class String(value: String)            extends Json
-    final case class Number(value: Double)            extends Json
-    final case class Boolean(value: Boolean)          extends Json
-    final case class Array(value: List[Json])         extends Json
-    final case class Object(value: Map[String, Json]) extends Json
-    case object Null                                  extends Json
-  }
-
-  // Its bacily a function
-  // its code not data so we do not need to serialize/deserialize
+  // Its basicly a function
+  // - its code not data so we do not need to serialize/deserialize
+  // - next step goal likely to:update: Record[In] => Option[List[Out]] ...
   final case class RuleEngine[-In, +Out](update: In => Option[List[Out]]) { self =>
+
     def contramap[In2](f: In2 => In): RuleEngine[In2, Out] = RuleEngine(in2 => self.update(f(in2)))
 
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
@@ -81,13 +74,36 @@ object declarative {
     def empty[In, Out]: RuleSet[In, Out] = RuleSet(Vector.empty)
   }
 
-  // Note: argumentation itsnot needed to be serializable becuase condition and action would be serialized
+  // Note: argumentation its not needed to be serializable becuase condition and action would be serialized
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
   sealed trait Numeric[A]
   object Numeric {
-    implicit case object ByteIsNumeric extends Numeric[Byte]
-    // TODO add the rest
+    implicit case object ByteIsNumeric   extends Numeric[Byte]
+    implicit case object CharIsNumeric   extends Numeric[Char]
+    implicit case object IntIsNumeric    extends Numeric[Int]
+    implicit case object LongIsNumeric   extends Numeric[Long]
+    implicit case object FloatIsNumeric  extends Numeric[Float]
+    implicit case object DoubleIsNumeric extends Numeric[Double]
+  }
+
+  // TODO: slide 60
+  // Note: some type level hands on
+  object Generic {
+    final case class FieldSpec[A](name: String, fieldType: PrimitiveType[A])
+
+    final case class Field[A](fieldSpec: FieldSpec[A], value: A)
+
+    // Note: we never value of fields exist
+    sealed trait Record[+Fields] {
+      def values: Chunk[Any]
+
+      def add[A](fs: FieldSpec[A], value: A): Record[Fields with A] = ???
+    }
+    object Record {
+      val empty: Record[Any] = ???
+    }
+
   }
 
   object PhantomType101 {
@@ -122,13 +138,24 @@ object declarative {
   //
   //
   // Note: john suggests to go away from sealed trait Expr[-In, +Out]
-  // to any values of in in memeory or when evaluted Ot so it could be phantom types
-  // ... he suggests using something like a hlist (complicated) or more simply use phantom types to strutuced data
+  // to any values of In in memeory or when evaluted Out so it could be phantom types
+  // ... he suggests using hlist (complicated) or more simply use phantom types to solve the strutuced data problem
   sealed trait Expr[-In, +Out] { self =>
 
-    // TODO slide 50 and so forth check palce
     final def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
       Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Add, tag)
+
+    final def -[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Subtract, tag)
+
+    final def *[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Multiply, tag)
+
+    final def /[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Divide, tag)
+
+    final def %[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
+      Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Modulo, tag)
 
     def &&[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
       Expr.And(self.widen[Boolean], that)
@@ -154,8 +181,6 @@ object declarative {
     // Note: casting becasue its safe (tm)
     // John uses this trick instead of going the more verbose Expr.`final case class Widen`
     def widen[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] = self.asInstanceOf[Expr[In, Out2]]
-
-    // TODO input
   }
 
   object Expr {
@@ -175,7 +200,6 @@ object declarative {
     final case class Input[In, Out](tag: PrimitiveType[Out])                             extends Expr[In, Out]
     final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
 
-    // TODO slide 45 and so forth
     final case class BinaryNumericOp[In, Out](
       lhs: Expr[In, Out],
       rhs: Expr[In, Out],
@@ -191,12 +215,10 @@ object declarative {
       case object Divide   extends NumericBinOpType
       case object Modulo   extends NumericBinOpType
     }
+
     implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
 
     def input[A](implicit tag: PrimitiveType[A]): Expr[A, A] = Input(tag)
-    // Expr(123)
-    // Expr("sdf")
-    // Expr(<something that will no compilole>)
   }
 
   // Note: ensure the primitive types are in sync with ordering types
@@ -245,7 +267,7 @@ object declarative {
 
     def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(
       self.expr || that.expr
-    ) // TODO mention that there is maybe an errro &&
+    ) // TODO mention that there is maybe an error &&
 
     def unary_! : Condition[In] = Condition(!expr)
 
@@ -303,26 +325,23 @@ object declarative {
 
   object loyalty {
 
-    val statusCondition: Condition[String] = Condition.isEqualTo("confirmed")
-
-    // TODO: goal but filed is unsafe - there is not gurantee that the field status is there
-    // Condition(Expr.field[String]("status") === Expr("confirmed"))
-
-    val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
-
-    // val statusCondition: Condition[String] =
-    //   Condition.isEqualTo("confirmed").contramap[FlightBooking](_.status.toString)
-
-    // val priceCondition: Condition[Double] = Condition.isLessThan(1000.0)
-
-    // Condition(Expr.field[Double]("price") === Expr(1000.0))
-
-    // Note: problem
-    val foo: Condition[String with Double] = statusCondition && priceCondition
-
-    // FlightBookStatus is not a type in our world ... it would need soe adjustments of `object Ordering {`
+    // Note:
+    // FlightBookStatus is not a type in Our world ... it would need soe adjustments of `object Ordering {`
     //    case class Ordering2[A, B](orderingA: Ordering[A], orderingB: Ordering[B]) extends Ordering[(A, B)]
     // John do not recommend to go down this path now ...
+
+    import net.degoes.afd.examples.loyalty._
+    import net.degoes.afd.examples.loyalty.LoyaltyTier._
+
+    val statusCondition: Condition[FlightBooking] = Condition(
+      Expr.field[FlightBooking, String]("status") === Expr("confirmed")
+    )
+
+    val priceCondition: Condition[FlightBooking] = Condition(
+      Expr.field[FlightBooking, Double]("price") === Expr(1000.0)
+    )
+
+    statusCondition && priceCondition
 
   }
 }
