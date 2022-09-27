@@ -86,16 +86,35 @@ object declarative {
 
   trait Expression
 
-  sealed trait PrimitiveType[A]
+  // Note: ensure the primitive types are in sync with ordering types
+  sealed trait PrimitiveType[A] {
+    def ordering: scala.math.Ordering[A]
+  }
   object PrimitiveType {
-    implicit case object BooleanType extends PrimitiveType[Boolean]
-    implicit case object ByteType    extends PrimitiveType[Byte]
-    implicit case object CharType    extends PrimitiveType[Char]
-    implicit case object IntType     extends PrimitiveType[Int]
-    implicit case object LongType    extends PrimitiveType[Long]
-    implicit case object FloatType   extends PrimitiveType[Float]
-    implicit case object DoubleType  extends PrimitiveType[Double]
-    implicit case object StringType  extends PrimitiveType[String]
+    implicit case object BooleanType extends PrimitiveType[Boolean] {
+      def ordering: scala.math.Ordering[Boolean] = scala.math.Ordering[Boolean]
+    }
+    implicit case object ByteType extends PrimitiveType[Byte] {
+      def ordering: scala.math.Ordering[Byte] = scala.math.Ordering[Byte]
+    }
+    implicit case object CharType extends PrimitiveType[Char] {
+      def ordering: scala.math.Ordering[Char] = scala.math.Ordering[Char]
+    }
+    implicit case object IntType extends PrimitiveType[Int] {
+      def ordering: scala.math.Ordering[Int] = scala.math.Ordering[Int]
+    }
+    implicit case object LongType extends PrimitiveType[Long] {
+      def ordering: scala.math.Ordering[Long] = scala.math.Ordering[Long]
+    }
+    implicit case object FloatType extends PrimitiveType[Float] {
+      def ordering: scala.math.Ordering[Float] = scala.math.Ordering[Float]
+    }
+    implicit case object DoubleType extends PrimitiveType[Double] {
+      def ordering: scala.math.Ordering[Double] = scala.math.Ordering[Double]
+    }
+    implicit case object StringType extends PrimitiveType[String] {
+      def ordering: scala.math.Ordering[String] = scala.math.Ordering[String]
+    }
   }
 
   // Note: poof constrain types
@@ -146,12 +165,12 @@ object declarative {
 
   }
   object Condition { self =>
-    final case class Constant(value: Boolean)                           extends Condition[Any]
-    final case class And[In](left: Condition[In], right: Condition[In]) extends Condition[In]
-    final case class Or[In](left: Condition[In], right: Condition[In])  extends Condition[In]
-    final case class Not[In](condition: Condition[In])                  extends Condition[In]
-    final case class IsEqualTo[In](rhs: In, ordering: Ordering[In])     extends Condition[In]
-    final case class LessThan[In](rhs: In, ordering: Ordering[In])      extends Condition[In]
+    final case class Constant(value: Boolean)                                 extends Condition[Any]
+    final case class And[In](left: Condition[In], right: Condition[In])       extends Condition[In]
+    final case class Or[In](left: Condition[In], right: Condition[In])        extends Condition[In]
+    final case class Not[In](condition: Condition[In])                        extends Condition[In]
+    final case class IsEqualTo[In](rhs: In, primitiveType: PrimitiveType[In]) extends Condition[In]
+    final case class LessThan[In](rhs: In, primitiveType: PrimitiveType[In])  extends Condition[In]
 
     // Note: we can not use scala math ordering because its executable encoding
     // scala.math.Ordering
@@ -164,19 +183,19 @@ object declarative {
     def constant[In](value: Boolean): Condition[In] = Constant(value)
 
     def eval[In](condition: Condition[In])(in: In): Boolean = condition match {
-      case Constant(value)     => value
-      case And(left, right)    => eval(left)(in) && eval(right)(in)
-      case Or(left, right)     => eval(left)(in) || eval(right)(in)
-      case Not(condition)      => !eval(condition)(in)
-      case IsEqualTo(rhs, ord) => ord.compare(in, rhs) == 0
-      case LessThan(rhs, ord)  => ord.compare(in, rhs) < 0
+      case Constant(value)    => value
+      case And(left, right)   => eval(left)(in) && eval(right)(in)
+      case Or(left, right)    => eval(left)(in) || eval(right)(in)
+      case Not(condition)     => !eval(condition)(in)
+      case IsEqualTo(rhs, pt) => pt.ordering.compare(in, rhs) == 0
+      case LessThan(rhs, pt)  => pt.ordering.compare(in, rhs) < 0
     }
 
-    def isEqualTo[In](in: In)(implicit ord: Ordering[In]): Condition[In] = IsEqualTo(in, ord)
+    def isEqualTo[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = IsEqualTo(in, tag)
 
-    def isLessThan[In](in: In)(implicit ord: Ordering[In]): Condition[In] = LessThan(in, ord)
+    def isLessThan[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = LessThan(in, tag)
 
-    def isGreaterThan[In](in: In)(implicit ord: Ordering[In]): Condition[In] = ??? // TODO LessThan(in, ord.reverse)
+    def isGreaterThan[In](in: In)(implicit tag: PrimitiveType[In]): Condition[In] = LessThan(in, tag)
 
     // Note: fromFunction can not be solved due to serialization
   }
