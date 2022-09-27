@@ -155,8 +155,28 @@ object declarative {
     // Note: fromFunction can not be solved due to serialization
   }
 
-  sealed trait Action[-In, +Out]
-  object Action { self => }
+  // Recap actions: LoyalyAction is pure data - think of Out as pure data do not need to be fancy liek a function
+  // think commands
+  // - Add points
+  // - Promote tier
+  // - Send email
+  // Outs are kind of instructons that tells us what to do.
+  sealed trait Action[-In, +Out] { self =>
+
+    def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
+      Action.Concat(self, that)
+
+    def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] = Action.Pipe(self, that)
+
+    // Niecetohave: zip, at least it do not have scala functions in the executaable encoding imple
+  }
+  object Action { self =>
+    final case class Concat[In, Out1, Out2](left: Action[In, Out1], right: Action[In, Out2]) extends Action[In, Out2]
+    final case class Pipe[In, Out1, Out2](left: Action[In, Out1], right: Action[Out1, Out2]) extends Action[In, Out2]
+    final case class Constant[Out](value: Out)                                               extends Action[Any, Out]
+
+    def constant[Out](out: Out): Action[Any, Out] = Constant(out)
+  }
 
   object loyalty {
 
