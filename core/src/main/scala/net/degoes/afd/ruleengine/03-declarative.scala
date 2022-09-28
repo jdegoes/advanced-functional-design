@@ -158,7 +158,18 @@ object declarative {
       () //l.name == r.name && l.fieldType == r.fieldType
     final case class Field[A](fieldSpec: FieldSpec[A], value: A)
 
-    final class Record[+Fields] private(map: Map[FieldSpec[_], Any]) { self =>
+    final class DynamicRecord private (private val map: Map[(String, PrimitiveType[_]), Any]) {
+      def ++[A](that: DynamicRecord): DynamicRecord =
+        new DynamicRecord(map ++ that.map)
+
+      def add[A](name: String, value: A)(implicit pt: PrimitiveType[A]): DynamicRecord =
+        new DynamicRecord(map + ((name, pt) -> value))
+
+      def get[A](name: String)(implicit pt: PrimitiveType[A]): Option[A] =
+        map.get((name, pt)).asInstanceOf[Option[A]]
+    }
+
+    final class Record[+Fields] private (map: Map[FieldSpec[_], Any]) { self =>
       def values: Chunk[Any] = Chunk.fromIterable(map.values)
 
       def add[A](fs: FieldSpec[A], value: A): Record[Fields with (fs.Type, A)] =
@@ -212,45 +223,29 @@ object declarative {
     def input[In](implicit pt: PrimitiveType[In]): Expr[In, In] = Identity(pt)
   }
 
-  sealed trait PrimitiveType[A] {
-    def ordering: Ordering[A]
+  sealed trait PrimitiveType[A] { self =>
+    def ordering: Ordering[A] = (self match {
+      case PrimitiveType.BooleanType => Ordering.Boolean
+      case PrimitiveType.IntType     => Ordering.Int
+      case PrimitiveType.LongType    => Ordering.Long
+      case PrimitiveType.FloatType   => Ordering[Float]
+      case PrimitiveType.DoubleType  => Ordering[Double]
+      case PrimitiveType.ShortType   => Ordering.Short
+      case PrimitiveType.ByteType    => Ordering.Byte
+      case PrimitiveType.CharType    => Ordering.Char
+      case PrimitiveType.StringType  => Ordering.String
+    }).asInstanceOf[Ordering[A]]
   }
   object PrimitiveType {
-    implicit case object BooleanType extends PrimitiveType[Boolean] {
-      override def ordering: Ordering[Boolean] = Ordering.Boolean
-    }
-
-    implicit case object IntType extends PrimitiveType[Int] {
-      override def ordering: Ordering[Int] = Ordering.Int
-    }
-
-    implicit case object LongType extends PrimitiveType[Long] {
-      override def ordering: Ordering[Long] = Ordering.Long
-    }
-
-    implicit case object FloatType extends PrimitiveType[Float] {
-      override def ordering: Ordering[Float] = Ordering[Float]
-    }
-
-    implicit case object DoubleType extends PrimitiveType[Double] {
-      override def ordering: Ordering[Double] = Ordering[Double]
-    }
-
-    implicit case object ShortType extends PrimitiveType[Short] {
-      override def ordering: Ordering[Short] = Ordering.Short
-    }
-
-    implicit case object ByteType extends PrimitiveType[Byte] {
-      override def ordering: Ordering[Byte] = Ordering.Byte
-    }
-
-    implicit case object CharType extends PrimitiveType[Char] {
-      override def ordering: Ordering[Char] = Ordering.Char
-    }
-
-    implicit case object StringType extends PrimitiveType[String] {
-      override def ordering: Ordering[String] = Ordering.String
-    }
+    implicit case object BooleanType extends PrimitiveType[Boolean]
+    implicit case object IntType     extends PrimitiveType[Int]
+    implicit case object LongType    extends PrimitiveType[Long]
+    implicit case object FloatType   extends PrimitiveType[Float]
+    implicit case object DoubleType  extends PrimitiveType[Double]
+    implicit case object ShortType   extends PrimitiveType[Short]
+    implicit case object ByteType    extends PrimitiveType[Byte]
+    implicit case object CharType    extends PrimitiveType[Char]
+    implicit case object StringType  extends PrimitiveType[String]
 
   }
 
