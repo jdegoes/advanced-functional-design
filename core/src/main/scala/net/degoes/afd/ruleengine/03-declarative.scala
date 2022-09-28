@@ -93,7 +93,7 @@ object declarative {
 
     def fromFunction[In, Out](f: Facts[In] => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
 
-    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = RuleEngine(???) // TODO ?
+    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = RuleEngine(???)
   }
 
   final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
@@ -307,18 +307,20 @@ object declarative {
 
   }
   object DynamicRecord {
-    import PrimitiveType._
-
     val empty: DynamicRecord[Any] = new DynamicRecord(Map())
 
-    // TODO fix primitive type should not be needed explicitly
-    // DynamicRecord.empty.add("isMale", true)(PrimitiveType.BooleanType).get[Int]("age")(PrimitiveType.IntType)
+    // Note: this record do not hold age and will fail with compile error:
+    // Cannot prove that Any with (String("isMale"), Boolean) with (String("street"), String) <:< (String("age"), Int).
+    // DynamicRecord.empty
+    //   .add("isMale", true)
+    //   .add("street", "123 Main st")
+    //   .get[Int]("age")
 
     DynamicRecord.empty
-      .add("isMale", true)(PrimitiveType.BooleanType)
-    //   .add("street", "123 Main st")(PrimitiveType.StringType)
-    //   .get[Int]("age")(PrimitiveType.IntType)
-
+      .add("age", 42)
+      .add("isMale", true)
+      .add("street", "123 Main st")
+      .get[Int]("age")
   }
 
   // Note: some type level hands on
@@ -337,11 +339,10 @@ object declarative {
       type WithFieldType[A, B] = FieldSpec[A] { type Type = B }
     }
 
-    val age =
-      FieldSpec[Int]("age")(PrimitiveType.IntType) // TODO should be possible to leave out the implicit arguments
-    val name   = FieldSpec[String]("name")(PrimitiveType.StringType)
-    val street = FieldSpec[String]("street")(PrimitiveType.StringType)
-    val isMale = FieldSpec[Boolean]("isMale")(PrimitiveType.BooleanType)
+    val age    = FieldSpec[Int]("age")
+    val name   = FieldSpec[String]("name")
+    val street = FieldSpec[String]("street")
+    val isMale = FieldSpec[Boolean]("isMale")
 
     // Note:  value of fields exist, its a phantom type
     final class Record[+Fields] private (val map: Map[FieldSpec[_], Any]) { self =>
@@ -489,7 +490,7 @@ object declarative {
 
     // Note: think of the following case classes constructors
     //
-    // final case class Fact[K <: Singleton with String, V]()                      extends Expr[Any, Facts[(K, V)]] TODO
+    // final case class Fact[K <: Singleton with String, V]()                      extends Expr[Any, Facts[(K, V)]]
     // `value: V` would not be flexible enough... so has to be Expr...
     // In used so we can have Input ... Any not enough
     final case class Fact[In, K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V], value: Expr[In, V])
@@ -535,13 +536,15 @@ object declarative {
     ): Expr[In, Facts[(K, V)]] =
       Fact(factDef, value)
 
-    // TODO
-    // def ifThenElse[In, Out](condition)
+    def ifThenElse[In, Out](
+      condition: Expr[In, Boolean]
+    )(ifTrue: Expr[In, Out], ifFalse: Expr[In, Out]): Expr[In, Out] =
+      IfThenElse(condition)(ifTrue, ifFalse)
 
     def input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V]): Expr[(K, V), V] = Input(factDef)
 
-    // Note: we use the fact /  ... approach
-    // def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ??? // TODO
+    // Note: we use the fact record  approach instead
+    // def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ???
   }
 
   // Note: proof constrain types
