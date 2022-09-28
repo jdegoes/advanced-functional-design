@@ -29,6 +29,32 @@ import scala.language.implicitConversions
  * set, produces actions as output.
  */
 object declarative {
+  // Note: ensure the primitive types are in sync with ordering types
+  sealed trait PrimitiveType[A] { self =>
+    def ordering: scala.math.Ordering[A] = PrimitiveType.orderingOf(self)
+  }
+  object PrimitiveType {
+    implicit case object BooleanType extends PrimitiveType[Boolean]
+    implicit case object ByteType    extends PrimitiveType[Byte]
+    implicit case object CharType    extends PrimitiveType[Char]
+    implicit case object IntType     extends PrimitiveType[Int]
+    implicit case object LongType    extends PrimitiveType[Long]
+    implicit case object FloatType   extends PrimitiveType[Float]
+    implicit case object DoubleType  extends PrimitiveType[Double]
+    implicit case object StringType  extends PrimitiveType[String]
+
+    def orderingOf[A](tag: PrimitiveType[A]): scala.math.Ordering[A] =
+      tag match {
+        case BooleanType => scala.math.Ordering[Boolean]
+        case ByteType    => scala.math.Ordering[Byte]
+        case CharType    => scala.math.Ordering[Char]
+        case IntType     => scala.math.Ordering[Int]
+        case LongType    => scala.math.Ordering[Long]
+        case FloatType   => scala.math.Ordering[Float]
+        case DoubleType  => scala.math.Ordering[Double]
+        case StringType  => scala.math.Ordering[String]
+      }
+  }
 
   // Its basicly a function
   // - its code not data so we do not need to serialize/deserialize
@@ -101,12 +127,10 @@ object declarative {
 
     // Note: type out put (name.type, A) => ("fieldName", Int) ...
     def add[A](name: String, value: A)(implicit tag: PrimitiveType[A]): DynamicRecord[Fields with (name.type, A)] =
-      new DynamicRecord(
-        map.updated(name -> tag, value)
-      )
+      new DynamicRecord(map.updated(name -> tag, value))
 
     def get[A](name: String)(implicit tag: PrimitiveType[A], ev: Fields <:< (name.type, A)): Option[A] =
-      map.get(name -> tag).asInstanceOf[Option[A]]
+      map.get(name -> tag).map(_.asInstanceOf[A])
 
   }
   object DynamicRecord {
@@ -117,8 +141,8 @@ object declarative {
     // TODO fix primitive type should not be needed explicitly
     // DynamicRecord.empty.add("isMale", true)(PrimitiveType.BooleanType).get[Int]("age")(PrimitiveType.IntType)
 
-    // DynamicRecord.empty
-    //   .add("isMale", true)(PrimitiveType.BooleanType)
+    DynamicRecord.empty
+      .add("isMale", true)(PrimitiveType.BooleanType)
     //   .add("street", "123 Main st")(PrimitiveType.StringType)
     //   .get[Int]("age")(PrimitiveType.IntType)
 
@@ -299,33 +323,6 @@ object declarative {
     def input[A](implicit tag: PrimitiveType[A]): Expr[A, A] = Input(tag)
 
     def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ??? // TODO
-  }
-
-  // Note: ensure the primitive types are in sync with ordering types
-  sealed trait PrimitiveType[A] { self =>
-    def ordering: scala.math.Ordering[A] = PrimitiveType.orderingOf(self)
-  }
-  object PrimitiveType {
-    implicit case object BooleanType extends PrimitiveType[Boolean]
-    implicit case object ByteType    extends PrimitiveType[Byte]
-    implicit case object CharType    extends PrimitiveType[Char]
-    implicit case object IntType     extends PrimitiveType[Int]
-    implicit case object LongType    extends PrimitiveType[Long]
-    implicit case object FloatType   extends PrimitiveType[Float]
-    implicit case object DoubleType  extends PrimitiveType[Double]
-    implicit case object StringType  extends PrimitiveType[String]
-
-    def orderingOf[A](tag: PrimitiveType[A]): scala.math.Ordering[A] =
-      tag match {
-        case BooleanType => scala.math.Ordering[Boolean]
-        case ByteType    => scala.math.Ordering[Byte]
-        case CharType    => scala.math.Ordering[Char]
-        case IntType     => scala.math.Ordering[Int]
-        case LongType    => scala.math.Ordering[Long]
-        case FloatType   => scala.math.Ordering[Float]
-        case DoubleType  => scala.math.Ordering[Double]
-        case StringType  => scala.math.Ordering[String]
-      }
   }
 
   // Note: proof constrain types
