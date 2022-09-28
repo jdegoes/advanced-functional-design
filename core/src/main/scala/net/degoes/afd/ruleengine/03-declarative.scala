@@ -18,6 +18,11 @@ import zio._
 
 import scala.annotation.implicitNotFound
 import scala.language.implicitConversions
+import net.degoes.afd.ruleengine.declarative.Expr.NumericBinOpType.Add
+import net.degoes.afd.ruleengine.declarative.Expr.NumericBinOpType.Subtract
+import net.degoes.afd.ruleengine.declarative.Expr.NumericBinOpType.Multiply
+import net.degoes.afd.ruleengine.declarative.Expr.NumericBinOpType.Divide
+import net.degoes.afd.ruleengine.declarative.Expr.NumericBinOpType.Modulo
 
 /**
  * Develop a fully declarative encoding of a rule engine. You are NOT allowed to
@@ -56,8 +61,29 @@ object declarative {
         case FloatType   => scala.math.Ordering[Float]
         case DoubleType  => scala.math.Ordering[Double]
         case StringType  => scala.math.Ordering[String]
-        case InstantType => ??? // scala.math.Ordering[Long].on(java.time.Instant)(_.toEpochMilli)
+        case InstantType => ??? // scala.math.Ordering[Long].on(java.time.Instant)(_.toEpochMilli) // TODO
       }
+  }
+
+  // Note:
+  // A possibel way to extend our simple primitev type system
+  // Composite should possible solve nested
+  sealed trait EngineType[A]
+  object EngineType {
+    final case class Primitive[A](primitiveType: PrimitiveType[A]) extends EngineType[A] {
+      def equals(left: A, right: A): Boolean   = primitiveType.ordering.equiv(left, right)
+      def LessThan(left: A, right: A): Boolean = primitiveType.ordering.lt(left, right)
+    }
+    final case class Composite[Fields](factsType: FactsType[Fields]) extends EngineType[Facts[Fields]] {
+      def equals(left: Facts[Fields], right: Facts[Fields]): Boolean   = ???
+      def LessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+    }
+
+    // TODO clean up the other ones and use theses
+    def fromPrimitiveType[A](primitiveType: PrimitiveType[A]): EngineType[A] = Primitive(primitiveType)
+
+    def fromFacts[Types](facts: Facts[Types]): EngineType[Facts[Types]] =
+      EngineType.Composite(FactsType.fromFacts(facts))
   }
 
   // Facts
@@ -93,7 +119,17 @@ object declarative {
 
     def fromFunction[In, Out](f: Facts[In] => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
 
-    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = RuleEngine(???)
+    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = {
+      val update: Facts[In] => Option[List[Out]] = execute(ruleSet, _)
+
+      RuleEngine(update)
+    }
+
+    private def execute[In, Out](ruleSet: RuleSet[In, Out], in: Facts[In]): Option[List[Out]] =
+      ruleSet.rules.find(_.condition.eval(in)).map { rule =>
+        rule.action.eval(in)
+      }
+
   }
 
   final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
@@ -114,14 +150,58 @@ object declarative {
   // Note: argumentation its not needed to be serializable becuase condition and action would be serialized
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
-  sealed trait Numeric[A]
+  sealed trait Numeric[A] {
+    type NumericType = A
+
+    import Expr.NumericBinOpType
+    import Expr.NumericBinOpType._
+
+    // TODO remove this one
+    def numeric: scala.math.Numeric[A]
+
+    // TODO slide 14
+    // def add(left: A, right: A): A
+
+    // TODO remiove numeric scala math numeric stuff
+    // and add interpreters and implement them
+
+    def primitiveType: PrimitiveType[A] =
+      (this match {
+        case _: Numeric.ByteIsNumeric.type   => PrimitiveType.ByteType
+        case _: Numeric.CharIsNumeric.type   => PrimitiveType.CharType
+        case _: Numeric.IntIsNumeric.type    => PrimitiveType.IntType
+        case _: Numeric.LongIsNumeric.type   => PrimitiveType.LongType
+        case _: Numeric.FloatIsNumeric.type  => PrimitiveType.FloatType
+        case _: Numeric.DoubleIsNumeric.type => PrimitiveType.DoubleType
+      }).asInstanceOf[PrimitiveType[A]]
+
+    def apply(binOp: Expr.NumericBinOpType)(left: A, right: A): A = binOp match {
+      case Add      => numeric.plus(left, right)
+      case Subtract => numeric.minus(left, right)
+      case Multiply => numeric.times(left, right)
+      case Divide   => ??? // numeric.div(left, right)
+      case Modulo   => ???
+    }
+  }
   object Numeric {
-    implicit case object ByteIsNumeric   extends Numeric[Byte]
-    implicit case object CharIsNumeric   extends Numeric[Char]
-    implicit case object IntIsNumeric    extends Numeric[Int]
-    implicit case object LongIsNumeric   extends Numeric[Long]
-    implicit case object FloatIsNumeric  extends Numeric[Float]
-    implicit case object DoubleIsNumeric extends Numeric[Double]
+    implicit case object ByteIsNumeric extends Numeric[Byte] {
+      def numeric: scala.math.Numeric[Byte] = scala.math.Numeric[Byte]
+    }
+    implicit case object CharIsNumeric extends Numeric[Char] {
+      def numeric: scala.math.Numeric[Char] = scala.math.Numeric[Char]
+    }
+    implicit case object IntIsNumeric extends Numeric[Int] {
+      def numeric: scala.math.Numeric[Int] = scala.math.Numeric[Int]
+    }
+    implicit case object LongIsNumeric extends Numeric[Long] {
+      def numeric: scala.math.Numeric[Long] = scala.math.Numeric[Long]
+    }
+    implicit case object FloatIsNumeric extends Numeric[Float] {
+      def numeric: scala.math.Numeric[Float] = scala.math.Numeric[Float]
+    }
+    implicit case object DoubleIsNumeric extends Numeric[Double] {
+      def numeric: scala.math.Numeric[Double] = scala.math.Numeric[Double]
+    }
   }
 
   /**
@@ -133,13 +213,17 @@ object declarative {
     def ++[Types2](that: Facts[Types2]): Facts[Types & Types2] =
       new Facts[Types & Types2](data ++ that.data) {}
 
+    def definitions: Chunk[FactDefinition[_]] = Chunk.fromIterable(data.keys)
+
+    def engineType = ???
+
     def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
       subset: Types <:< (Key, Value)
     ): Value =
       data(pd).asInstanceOf[Value]
 
     /**
-     * Returns a new facts collection with the specified fact added.
+     * Returns a new facts collection with the specified primitive fact added.
      */
     def add[Key <: Singleton with String, Value: PrimitiveType](
       pd: FactDefinition[(Key, Value)],
@@ -147,11 +231,20 @@ object declarative {
     ): Facts[Types & (Key, Value)] =
       new Facts[Types & (Key, Value)](data + (pd -> value)) {}
 
+    /**
+     * Returns a new facts collection with the specified composite fact added.
+     */
+    def add[Key <: Singleton with String, Types2](
+      pd: FactDefinition[(Key, Facts[Types2])],
+      value: Facts[Types2]
+    ): Facts[Types & (Key, Facts[Types2])] =
+      new Facts[Types & (Key, Facts[Types2])](data + (pd -> value)) {}
+
     private def add[Key <: Singleton with String, Value: PrimitiveType](
       name: Key,
       value: Value
     ): Facts[Types & (Key, Value)] =
-      new Facts[Types & (Key, Value)](data + (FactDefinition[Key, Value](name) -> value)) {}
+      new Facts[Types & (Key, Value)](data + (FactDefinition.prim[Key, Value](name) -> value)) {}
 
     object unsafe {
       def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Option[Any] = data.get(pd)
@@ -163,6 +256,9 @@ object declarative {
      * An empty facts collection.
      */
     val empty: Facts[Any] = new Facts[Any](Map.empty) {}
+
+    def engineTypeOf[Types](facts: Facts[Types]): EngineType[Facts[Types]] =
+      EngineType.Composite(FactsType.fromFacts(facts))
 
     def apply[Key <: Singleton with String, Value: PrimitiveType](key: Key, value: Value): Facts[(Key, Value)] =
       empty.add(key, value)
@@ -248,7 +344,8 @@ object declarative {
 
     def name: Key
 
-    def tag: PrimitiveType[Value]
+    def tag: EngineType[Value]
+    // def tag: PrimitiveType[Value]
 
     // Note: there is a way (self: FactDefinition[Key, Value] =>) to not use cast but cast is easiest...
     // A constructor: Reads a value in a expr out of a FactDefinition - it could also have been on Expr
@@ -266,24 +363,49 @@ object declarative {
     // Note Type  refinment
     type KeyValue[K <: Singleton with String, V] = FactDefinition[(K, V)] { type Key = K; type Value = V }
 
-    def apply[N <: Singleton with String, T](name0: N)(implicit paramType0: PrimitiveType[T]): KeyValue[N, T] =
+    def apply[N <: Singleton with String, T](name0: N, tag0: EngineType[T]): KeyValue[N, T] =
       new FactDefinition[(N, T)] {
         type Key   = N
         type Value = T
-        def name: N               = name0
-        def tag: PrimitiveType[T] = paramType0
+        def name: N            = name0
+        def tag: EngineType[T] = tag0
       }
 
-    def boolean[N <: Singleton with String](name0: N): KeyValue[N, Boolean] = FactDefinition[N, Boolean](name0)
+    def facts[N <: Singleton with String, Fields](name: N, factsType: FactsType[Fields]): KeyValue[N, Facts[Fields]] =
+      FactDefinition[N, Facts[Fields]](name, EngineType.Composite(factsType))
 
-    def double[N <: Singleton with String](name0: N): KeyValue[N, Double] = FactDefinition[N, Double](name0)
+    def prim[N <: Singleton with String, T](name0: N)(implicit tag0: PrimitiveType[T]): KeyValue[N, T] =
+      new FactDefinition[(N, T)] {
+        type Key   = N
+        type Value = T
+        def name: N            = name0
+        def tag: EngineType[T] = EngineType.Primitive(tag0)
+      }
 
-    def int[N <: Singleton with String](name0: N): KeyValue[N, Int] = FactDefinition[N, Int](name0)
+    def boolean[N <: Singleton with String](name0: N): KeyValue[N, Boolean] = FactDefinition.prim[N, Boolean](name0)
+
+    def double[N <: Singleton with String](name0: N): KeyValue[N, Double] = FactDefinition.prim[N, Double](name0)
+
+    def int[N <: Singleton with String](name0: N): KeyValue[N, Int] = FactDefinition.prim[N, Int](name0)
 
     def instant[N <: Singleton with String](name0: N): KeyValue[N, java.time.Instant] =
-      FactDefinition[N, java.time.Instant](name0)
+      FactDefinition.prim[N, java.time.Instant](name0)
 
-    def string[N <: Singleton with String](name0: N): KeyValue[N, String] = FactDefinition[N, String](name0)
+    def string[N <: Singleton with String](name0: N): KeyValue[N, String] = FactDefinition.prim[N, String](name0)
+  }
+
+  class FactsType[KeyValues] private (private val definitions: Chunk[FactDefinition[_]]) {
+    def ++[KeyValues2](that: FactsType[KeyValues2]): FactsType[KeyValues & KeyValues2] =
+      new FactsType(definitions ++ that.definitions)
+
+    def add[KeyValue](definition: FactDefinition[KeyValue]): FactsType[KeyValue & KeyValues] =
+      new FactsType(definitions :+ definition)
+  }
+  object FactsType {
+    val empty: FactsType[Any] = new FactsType(Chunk.empty)
+
+    def fromFacts[KeyValues](facts: Facts[KeyValues]): FactsType[KeyValues] =
+      new FactsType(facts.definitions)
   }
 
   // Store int, etc and get type out of it
@@ -465,6 +587,8 @@ object declarative {
 
     final def >>>[Out2](that: Expr[Out, Out2]): Expr[In, Out2] = Expr.Pipe(self, that)
 
+    def eval(in: Facts[In]): Out = Expr.eval(in, self)
+
     def ifTrue[In1 <: In, Out2](ifTrue: Expr[In1, Out2])(implicit ev: Out <:< Boolean): Expr.IfTrue[In1, Out2] =
       Expr.IfTrue(self.widen[Boolean], ifTrue)
 
@@ -485,7 +609,7 @@ object declarative {
     // IfTrue is a helper so we can write
     Expr(true).ifTrue(42).otherwise(43)
     final case class IfTrue[In, Out](condition: Expr[In, Boolean], ifTrue: Expr[In, Out]) extends Expr[In, Out] {
-      def otherwise(ifFalse: Expr[In, Out]): Expr[In, Out] = Expr.IfThenElse(condition)(ifTrue, ifFalse)
+      def otherwise(ifFalse: Expr[In, Out]): Expr[In, Out] = Expr.IfThenElse(condition, ifTrue, ifFalse)
     }
 
     // Note: think of the following case classes constructors
@@ -499,7 +623,7 @@ object declarative {
       left: Expr[In, Facts[V1]],
       right: Expr[In, Facts[V2]]
     ) extends Expr[In, Facts[V1 & V2]]
-    final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
+    final case class Constant[Out](value: Out, tag: EngineType[Out])            extends Expr[Any, Out]
     final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
     final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])  extends Expr[In, Boolean]
     final case class Not[In](condition: Expr[In, Boolean])                      extends Expr[In, Boolean]
@@ -516,7 +640,7 @@ object declarative {
       tag: Numeric[Out]
     ) extends Expr[In, Out]
 
-    final case class IfThenElse[In, Out](condition: Expr[In, Boolean])(ifTrue: Expr[In, Out], ifFalse: Expr[In, Out])
+    final case class IfThenElse[In, Out](condition: Expr[In, Boolean], ifTrue: Expr[In, Out], ifFalse: Expr[In, Out])
         extends Expr[In, Out]
 
     sealed trait NumericBinOpType
@@ -528,7 +652,68 @@ object declarative {
       case object Modulo   extends NumericBinOpType
     }
 
-    implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
+    implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] =
+      Constant(out, EngineType.Primitive(tag))
+
+    implicit def apply[Out](out: Facts[Out]): Expr[Any, Facts[Out]] =
+      Constant(out, Facts.engineTypeOf[Out](out))
+
+    // Note: possibel signature to solve right == left
+    // def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (PrimitiveType[Out], Out)
+    // will not work becuase we do not have Facts of PrimitiveType...
+
+    def eval[In, Out](in: Facts[In], expr: Expr[In, Out]): Out =
+      evalWithType(in, expr)._2
+
+    def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (EngineType[Out], Out) = expr match {
+      case IfTrue(condition, ifTrue) => ???
+      case Fact(factDef, value) =>
+        implicit val tag = factDef.tag
+        // Facts.empty.add(factDef, value)
+        ???
+      case CombineFacts(left, right) => ???
+      case Constant(value, tag)      => ???
+      case And(lhs, rhs) =>
+        val left  = eval(in, lhs)
+        val right = eval(in, rhs)
+        left && right
+        ???
+      case Or(lhs, rhs) =>
+        val left  = eval(in, lhs)
+        val right = eval(in, rhs)
+        left || right
+        ???
+
+      case Not(condition) => ???
+      case EqualTo(lhs, rhs) =>
+        val left  = eval(in, lhs)
+        val right = eval(in, rhs)
+        left == right // TODO might not be correct for all types
+        ???
+      case LessThan(lhs, rhs) =>
+        // Slide 50
+        ??? // TODO might not be correct for all types
+      case Input(factDef) =>
+        val fieldValue = Unsafe.unsafe { implicit u =>
+          in.unsafe.get(factDef)
+        }
+        fieldValue.asInstanceOf[Out]
+        ???
+      case Pipe(left, right) => ???
+      case BinaryNumericOp(lhs, rhs, op, tag0) =>
+        val tag = tag0.asInstanceOf[Numeric[Out]]
+
+        val left  = eval(in, lhs)
+        val right = eval(in, rhs)
+
+        tag(op)(left, right)
+        ???
+      case IfThenElse(condition, ifTrue, ifFalse) =>
+        val bool = eval(in, condition)
+        if (bool) eval(in, ifTrue)
+        else eval(in, ifFalse)
+        ???
+    }
 
     def fact[In, K <: Singleton with String, V](
       factDef: FactDefinition.KeyValue[K, V],
@@ -539,7 +724,7 @@ object declarative {
     def ifThenElse[In, Out](
       condition: Expr[In, Boolean]
     )(ifTrue: Expr[In, Out], ifFalse: Expr[In, Out]): Expr[In, Out] =
-      IfThenElse(condition)(ifTrue, ifFalse)
+      IfThenElse(condition, ifTrue, ifFalse)
 
     def input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V]): Expr[(K, V), V] = Input(factDef)
 
@@ -563,6 +748,9 @@ object declarative {
     def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(
       self.expr || that.expr
     ) // TODO mention that there is maybe an error &&
+
+    // TODO
+    def eval(facts: Facts[In]): Boolean = expr.eval(facts)
 
     def unary_! : Condition[In] = Condition(!expr)
 
@@ -606,8 +794,20 @@ object declarative {
     def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
       Action.Concat(self, that)
 
-    def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] = Action.Pipe(self, that)
+    def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] =
+      Action.Pipe(self, that)
 
+    def eval(facts: Facts[In]): List[Out] =
+      self match {
+        case Action.Concat(left, right: Action[In, Out]) => ???
+        // left.eval(facts) ++ right.eval(facts)
+
+        case Action.Pipe(left, right) =>
+          ???
+
+        case Action.FromExpr(expr) =>
+          List(expr.eval(facts))
+      }
     // Niecetohave: zip, at least it do not have scala functions in the executaable encoding imple
   }
   object Action { self =>
@@ -616,8 +816,6 @@ object declarative {
     final case class FromExpr[In, Out](expr: Expr[In, Out])                                  extends Action[In, Out]
 
     def fromExpr[In, Out](expr: Expr[In, Out]): Action[In, Out] = FromExpr(expr)
-
-    def constant[Out](out: Out)(implicit tag: PrimitiveType[Out]): Action[Any, Out] = fromExpr(Expr(out))
   }
 
   object loyalty {
@@ -629,13 +827,32 @@ object declarative {
     import net.degoes.afd.examples.loyalty._
     import net.degoes.afd.examples.loyalty.LoyaltyTier._
 
-    // Rule engine model of FlightBooking and FlightBookingStatus that can be understood outside scala
+    // Rule engine models of FlightBooking and FlightBookingStatus that can be understood outside scala
+
+    object Flight {
+      val id     = FactDefinition.string("id")
+      val number = FactDefinition.string("number")
+
+      val factsType = FactsType.empty.add(id).add(number)
+    }
+
+    object Customer {
+      val id    = FactDefinition.string("id")
+      val name  = FactDefinition.string("name")
+      val email = FactDefinition.string("email")
+      val phone = FactDefinition.string("phone")
+
+      val factsType = FactsType.empty.add(id).add(name).add(email).add(phone)
+    }
+
     object FlightBooking {
       val id       = FactDefinition.string("id")
-      val customer = FactDefinition.string("customer") // FIXME: Support nested data
-      val flight   = FactDefinition.string("flight")   // FIXME: Support nested data
+      val customer = FactDefinition.facts("customer", Customer.factsType)
+      val flight   = FactDefinition.facts("flight", Flight.factsType)
       val price    = FactDefinition.double("price")
       val status   = FactDefinition.string("status")
+
+      val factsType = FactsType.empty.add(id).add(customer).add(flight).add(price).add(status)
     }
     object FlightBookingStatus {
       val Confirmed = Expr("Confirmed")
@@ -663,5 +880,10 @@ object declarative {
     // { "action_type": "upgrade_tier", "customer": "customer_id" }
     // { "action_type": "downgrade_tier", "customer": "customer_id" }
 
+    // cool we can model nested data, but not set
+    Customer.name.set(???)
+    // not possible
+    // FlightBooking.customer.name.set(???)
+    FlightBooking.customer.set(???)
   }
 }
