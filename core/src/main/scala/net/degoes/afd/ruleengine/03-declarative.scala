@@ -143,6 +143,8 @@ object declarative {
     }
 
     object FieldSpec {
+      def apply[A](name: String)(implicit pt: PrimitiveType[A]): FieldSpec[A] =
+        FieldSpec(name, pt)
       // lifts the path dependent type to a type parameter
       type WithFieldType[A, B] = FieldSpec[A] { type Type = B }
     }
@@ -156,21 +158,21 @@ object declarative {
       () //l.name == r.name && l.fieldType == r.fieldType
     final case class Field[A](fieldSpec: FieldSpec[A], value: A)
 
-    sealed trait Record[Fields] { self =>
-      def values: Chunk[Any]
+    final class Record[+Fields] private(map: Map[FieldSpec[_], Any]) { self =>
+      def values: Chunk[Any] = Chunk.fromIterable(map.values)
 
-      def add[A](fs: FieldSpec[A], value: A): Record[Fields with A] =
-        new Record[Fields with A] {
-          def values: Chunk[Any] = self.values :+ value
-        }
+      def add[A](fs: FieldSpec[A], value: A): Record[Fields with (fs.Type, A)] =
+        new Record[Fields with (fs.Type, A)](map.updated(fs, value))
 
-      def getInt(implicit ev: Fields <:< Int): Int =
-        values.collect { case i: Int => i }.head
+      def get[A](fs: FieldSpec[A])(implicit ev: Fields <:< (A, fs.Type)): A =
+        map(fs).asInstanceOf[A]
+
+      def updateWith[A](fs: FieldSpec[A], f: A => A)(implicit ev: Fields <:< (A, fs.Type)): Record[Fields] =
+        new Record[Fields](map.updated(fs, f(map(fs).asInstanceOf[A])))
+
     }
     object Record {
-      def empty: Record[Any] = new Record[Any] {
-        def values: Chunk[Any] = Chunk.empty
-      }
+      def empty: Record[Any] = new Record[Any](Map.empty)
     }
 
     Record.empty.add(age, 42).add(name, "John").add(isMale, true)
