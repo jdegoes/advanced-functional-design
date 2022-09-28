@@ -24,6 +24,6 @@ object incremental {
     def update(input: InputChange[Input]): UIO[OutputChange[Output]]
   }
   object IncrementalRuleEngine {
-    def apply[Input, Output](ruleSet: RuleSet): UIO[IncrementalRuleEngine[Input, Output]] = ???
+    def apply[Input, Output](ruleSet: RuleSet[Any, String]): UIO[IncrementalRuleEngine[Input, Output]] = ???
   }
 }
