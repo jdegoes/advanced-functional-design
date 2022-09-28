@@ -302,34 +302,30 @@ object declarative {
   }
 
   // Note: ensure the primitive types are in sync with ordering types
-  sealed trait PrimitiveType[A] {
-    def ordering: scala.math.Ordering[A]
+  sealed trait PrimitiveType[A] { self =>
+    def ordering: scala.math.Ordering[A] = PrimitiveType.orderingOf(self)
   }
   object PrimitiveType {
-    implicit case object BooleanType extends PrimitiveType[Boolean] {
-      def ordering: scala.math.Ordering[Boolean] = scala.math.Ordering[Boolean]
-    }
-    implicit case object ByteType extends PrimitiveType[Byte] {
-      def ordering: scala.math.Ordering[Byte] = scala.math.Ordering[Byte]
-    }
-    implicit case object CharType extends PrimitiveType[Char] {
-      def ordering: scala.math.Ordering[Char] = scala.math.Ordering[Char]
-    }
-    implicit case object IntType extends PrimitiveType[Int] {
-      def ordering: scala.math.Ordering[Int] = scala.math.Ordering[Int]
-    }
-    implicit case object LongType extends PrimitiveType[Long] {
-      def ordering: scala.math.Ordering[Long] = scala.math.Ordering[Long]
-    }
-    implicit case object FloatType extends PrimitiveType[Float] {
-      def ordering: scala.math.Ordering[Float] = scala.math.Ordering[Float]
-    }
-    implicit case object DoubleType extends PrimitiveType[Double] {
-      def ordering: scala.math.Ordering[Double] = scala.math.Ordering[Double]
-    }
-    implicit case object StringType extends PrimitiveType[String] {
-      def ordering: scala.math.Ordering[String] = scala.math.Ordering[String]
-    }
+    implicit case object BooleanType extends PrimitiveType[Boolean]
+    implicit case object ByteType    extends PrimitiveType[Byte]
+    implicit case object CharType    extends PrimitiveType[Char]
+    implicit case object IntType     extends PrimitiveType[Int]
+    implicit case object LongType    extends PrimitiveType[Long]
+    implicit case object FloatType   extends PrimitiveType[Float]
+    implicit case object DoubleType  extends PrimitiveType[Double]
+    implicit case object StringType  extends PrimitiveType[String]
+
+    def orderingOf[A](tag: PrimitiveType[A]): scala.math.Ordering[A] =
+      tag match {
+        case BooleanType => scala.math.Ordering[Boolean]
+        case ByteType    => scala.math.Ordering[Byte]
+        case CharType    => scala.math.Ordering[Char]
+        case IntType     => scala.math.Ordering[Int]
+        case LongType    => scala.math.Ordering[Long]
+        case FloatType   => scala.math.Ordering[Float]
+        case DoubleType  => scala.math.Ordering[Double]
+        case StringType  => scala.math.Ordering[String]
+      }
   }
 
   // Note: proof constrain types
