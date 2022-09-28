@@ -10,6 +10,14 @@ object Examples extends ZIOAppDefault {
 
   val facts = Facts.empty
 
+  val strAge: "age" = "age"
+
+  // Recap scala 2.13.* like scala 3 -> singleton type is a type and a value
+  val one: 1 = 1
+
+  implicitly[1 <:< Int]
+  implicitly["foo" <:< String]
+
   val facts2 = facts.add(age, 42).add(name, "John Doe").add(dob, java.time.Instant.now())
 
   val run =
