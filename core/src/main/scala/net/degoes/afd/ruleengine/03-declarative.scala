@@ -87,6 +87,31 @@ object declarative {
     implicit case object DoubleIsNumeric extends Numeric[Double]
   }
 
+  // Store int, etc and get type out of it
+  // its like json api but more type safe
+  final class DynamicRecord private (private val map: Map[(String, PrimitiveType[_]), Any]) {
+    def ++(that: DynamicRecord): DynamicRecord =
+      new DynamicRecord(map ++ that.map)
+
+    def add[A](name: String, value: A)(implicit tag: PrimitiveType[A]): DynamicRecord =
+      new DynamicRecord(
+        map.updated(name -> tag, value)
+      )
+
+    def get[A](name: String)(implicit tag: PrimitiveType[A]): Option[A] =
+      map.get(name -> tag).asInstanceOf[Option[A]]
+
+  }
+
+  object DynamicRecord {
+    import PrimitiveType._
+
+    val empty: DynamicRecord = new DynamicRecord(Map())
+
+    // TODO fix primitive type should not be needed explicitly
+    DynamicRecord.empty.add("isMale", true)(PrimitiveType.BooleanType).get[Int]("age")(PrimitiveType.IntType)
+  }
+
   // Note: some type level hands on
   object GenericTypeLevel101 {
 
