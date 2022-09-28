@@ -10,6 +10,7 @@ package net.degoes.afd.ruleengine
 import net.degoes.afd.examples.loyalty.{FlightBooking, LoyaltyProgram}
 import net.degoes.afd.ruleengine.basics.LoyaltyCondition
 import net.degoes.afd.ruleengine.generic.loyalty.LoyaltyRule
+import zio.Task
 
 /**
  * Create a functional domain to express how rules translate into actions, which
@@ -49,6 +50,7 @@ object generic {
       RuleEngine(ruleSet.update)
   }
 
+  //rules is our executors - it enables us to enumerate over an ordered list of rules.
   final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
     def + [In1 <: In, Out1 >: Out](that: Rule[In1, Out1]): RuleSet[In1, Out1] =
       RuleSet(self.rules :+ that)
@@ -70,6 +72,8 @@ object generic {
     val empty: RuleSet[Any, Nothing] = RuleSet(Vector.empty)
   }
 
+  // {"condition": ???, "action": ???}
+  // Note: Cannot serialize a function.
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
   final case class Condition[-In](eval: In => Boolean) { self =>
@@ -173,15 +177,15 @@ object generic {
     }
 
     object example {
-      val exampleCondition =
+      val exampleCondition: Condition[FlightBooking] =
         LoyaltyCondition.status(_ == FlightBookingStatus.Confirmed) &&
           LoyaltyCondition.price(_ > 1000)
 
-      val exampleAction  = LoyaltyAction.upgradeTier ++ LoyaltyAction.adjustPoints(100)
-      val exampleRule    = LoyaltyRule(exampleCondition, exampleAction)
-      val exampleRuleSet = RuleSet.empty.addRule(exampleRule)
+      val exampleAction: Action[Any, Patch[LoyaltyProgram]] = LoyaltyAction.upgradeTier ++ LoyaltyAction.adjustPoints(100)
+      val exampleRule: LoyaltyRule = LoyaltyRule(exampleCondition, exampleAction)
+      val exampleRuleSet: RuleSet[FlightBooking, Patch[LoyaltyProgram]] = RuleSet.empty.addRule(exampleRule)
 
-      val engine = RuleEngine.fromRuleSet(exampleRuleSet)
+      val engine: RuleEngine[FlightBooking, Patch[LoyaltyProgram]] = RuleEngine.fromRuleSet(exampleRuleSet)
 
       def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram = {
         val empty = identity[LoyaltyProgram](_)
