@@ -16,7 +16,7 @@ package net.degoes.afd.ruleengine
  * sure to leverage parametric polymorphism in your efforts to make the rule
  * engine generic.
  */
-object generic {
+object genericJohn {
   final case class RuleEngine[-In, +Out](update: In => Option[List[Out]]) { self =>
     def contramap[In2](f: In2 => In): RuleEngine[In2, Out] = RuleEngine(in2 => self.update(f(in2)))
 
