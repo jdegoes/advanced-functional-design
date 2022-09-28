@@ -14,8 +14,9 @@
  */
 package net.degoes.afd.ruleengine
 
-import zio.Chunk
+import zio._
 
+import scala.annotation.implicitNotFound
 import scala.language.implicitConversions
 
 /**
@@ -30,6 +31,7 @@ import scala.language.implicitConversions
  */
 object declarative {
   // Note: ensure the primitive types are in sync with ordering types
+  @implicitNotFound("The type ${A} is not supported as a fact type and cannot be used for this method.")
   sealed trait PrimitiveType[A] { self =>
     def ordering: scala.math.Ordering[A] = PrimitiveType.orderingOf(self)
   }
@@ -42,6 +44,7 @@ object declarative {
     implicit case object FloatType   extends PrimitiveType[Float]
     implicit case object DoubleType  extends PrimitiveType[Double]
     implicit case object StringType  extends PrimitiveType[String]
+    implicit case object InstantType extends PrimitiveType[java.time.Instant]
 
     def orderingOf[A](tag: PrimitiveType[A]): scala.math.Ordering[A] =
       tag match {
@@ -53,8 +56,13 @@ object declarative {
         case FloatType   => scala.math.Ordering[Float]
         case DoubleType  => scala.math.Ordering[Double]
         case StringType  => scala.math.Ordering[String]
+        case InstantType => ??? // scala.math.Ordering[Long].on(java.time.Instant)(_.toEpochMilli)
       }
   }
+
+// Facts
+// FactDefinition
+// PrimitiveType = PrimitiveType
 
   // Its basicly a function
   // - its code not data so we do not need to serialize/deserialize
@@ -111,6 +119,151 @@ object declarative {
     implicit case object LongIsNumeric   extends Numeric[Long]
     implicit case object FloatIsNumeric  extends Numeric[Float]
     implicit case object DoubleIsNumeric extends Numeric[Double]
+  }
+
+  /**
+   * Contains a collection of facts, whose structure is described by a phantom
+   * type parameter.
+   */
+  sealed abstract case class Facts[Types] private (private val data: Map[FactDefinition[_], Any]) {
+    def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
+      subset: Types <:< (Key, Value)
+    ): Value =
+      data(pd).asInstanceOf[Value]
+
+    /**
+     * Returns a new facts collection with the specified fact added.
+     */
+    def add[Key <: Singleton with String, Value: PrimitiveType](
+      pd: FactDefinition[(Key, Value)],
+      value: Value
+    ): Facts[Types & (Key, Value)] =
+      new Facts[Types & (Key, Value)](data + (pd -> value)) {}
+
+    private def add[Key <: Singleton with String, Value: PrimitiveType](
+      name: Key,
+      value: Value
+    ): Facts[Types & (Key, Value)] =
+      new Facts[Types & (Key, Value)](data + (FactDefinition[Key, Value](name) -> value)) {}
+
+    object unsafe {
+      def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Option[Any] = data.get(pd)
+    }
+  }
+  object Facts {
+
+    /**
+     * An empty facts collection.
+     */
+    val empty: Facts[Any] = new Facts[Any](Map.empty) {}
+
+    def apply[Key <: Singleton with String, Value: PrimitiveType](key: Key, value: Value): Facts[(Key, Value)] =
+      empty.add(key, value)
+
+    def apply[
+      Key1 <: Singleton with String,
+      Value1: PrimitiveType,
+      Key2 <: Singleton with String,
+      Value2: PrimitiveType
+    ](
+      tuple1: (Key1, Value1),
+      tuple2: (Key2, Value2)
+    ): Facts[(Key1, Value1) & (Key2, Value2)] =
+      empty.add[Key1, Value1](tuple1._1, tuple1._2).add[Key2, Value2](tuple2._1, tuple2._2)
+
+    def apply[
+      Key1 <: Singleton with String,
+      Value1: PrimitiveType,
+      Key2 <: Singleton with String,
+      Value2: PrimitiveType,
+      Key3 <: Singleton with String,
+      Value3: PrimitiveType
+    ](
+      tuple1: (Key1, Value1),
+      tuple2: (Key2, Value2),
+      tuple3: (Key3, Value3)
+    ): Facts[(Key1, Value1) & (Key2, Value2) & (Key3, Value3)] =
+      empty
+        .add[Key1, Value1](tuple1._1, tuple1._2)
+        .add[Key2, Value2](tuple2._1, tuple2._2)
+        .add[Key3, Value3](tuple3._1, tuple3._2)
+
+    def apply[
+      Key1 <: Singleton with String,
+      Value1: PrimitiveType,
+      Key2 <: Singleton with String,
+      Value2: PrimitiveType,
+      Key3 <: Singleton with String,
+      Value3: PrimitiveType,
+      Key4 <: Singleton with String,
+      Value4: PrimitiveType
+    ](
+      tuple1: (Key1, Value1),
+      tuple2: (Key2, Value2),
+      tuple3: (Key3, Value3),
+      tuple4: (Key4, Value4)
+    ): Facts[(Key1, Value1) & (Key2, Value2) & (Key3, Value3) & (Key4, Value4)] =
+      empty
+        .add[Key1, Value1](tuple1._1, tuple1._2)
+        .add[Key2, Value2](tuple2._1, tuple2._2)
+        .add[Key3, Value3](tuple3._1, tuple3._2)
+        .add[Key4, Value4](tuple4._1, tuple4._2)
+
+    def apply[
+      Key1 <: Singleton with String,
+      Value1: PrimitiveType,
+      Key2 <: Singleton with String,
+      Value2: PrimitiveType,
+      Key3 <: Singleton with String,
+      Value3: PrimitiveType,
+      Key4 <: Singleton with String,
+      Value4: PrimitiveType,
+      Key5 <: Singleton with String,
+      Value5: PrimitiveType
+    ](
+      tuple1: (Key1, Value1),
+      tuple2: (Key2, Value2),
+      tuple3: (Key3, Value3),
+      tuple4: (Key4, Value4),
+      tuple5: (Key5, Value5)
+    ): Facts[(Key1, Value1) & (Key2, Value2) & (Key3, Value3) & (Key4, Value4) & (Key5, Value5)] =
+      empty
+        .add[Key1, Value1](tuple1._1, tuple1._2)
+        .add[Key2, Value2](tuple2._1, tuple2._2)
+        .add[Key3, Value3](tuple3._1, tuple3._2)
+        .add[Key4, Value4](tuple4._1, tuple4._2)
+        .add[Key5, Value5](tuple5._1, tuple5._2)
+  }
+
+  sealed trait FactDefinition[KeyValue] { self =>
+    type Key <: Singleton with String
+    type Value
+
+    def name: Key
+
+    def tag: PrimitiveType[Value]
+
+    override final def toString(): String = s"FactDefinition($name, $tag)"
+  }
+  object FactDefinition {
+    def apply[N <: Singleton with String, T](name0: N)(implicit paramType0: PrimitiveType[T]): FactDefinition[(N, T)] =
+      new FactDefinition[(N, T)] {
+        type Key   = N
+        type Value = T
+        def name: N               = name0
+        def tag: PrimitiveType[T] = paramType0
+      }
+
+    def boolean[N <: Singleton with String](name0: N): FactDefinition[(N, Boolean)] = FactDefinition[N, Boolean](name0)
+
+    def double[N <: Singleton with String](name0: N): FactDefinition[(N, Double)] = FactDefinition[N, Double](name0)
+
+    def int[N <: Singleton with String](name0: N): FactDefinition[(N, Int)] = FactDefinition[N, Int](name0)
+
+    def instant[N <: Singleton with String](name0: N): FactDefinition[(N, java.time.Instant)] =
+      FactDefinition[N, java.time.Instant](name0)
+
+    def string[N <: Singleton with String](name0: N): FactDefinition[(N, String)] = FactDefinition[N, String](name0)
   }
 
   // Store int, etc and get type out of it
