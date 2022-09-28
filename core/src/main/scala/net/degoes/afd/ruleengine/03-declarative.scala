@@ -60,37 +60,40 @@ object declarative {
       }
   }
 
-// Facts
-// FactDefinition
-// PrimitiveType = PrimitiveType
+  // Facts
+  // FactDefinition
+  // PrimitiveType = PrimitiveType
 
   // Its basicly a function
   // - its code not data so we do not need to serialize/deserialize
   // - next step goal likely to:update: Record[In] => Option[List[Out]] ...
-  final case class RuleEngine[-In, +Out](update: In => Option[List[Out]]) { self =>
+  final case class RuleEngine[-In, +Out](update: Facts[In] => Option[List[Out]]) { self =>
 
-    def contramap[In2](f: In2 => In): RuleEngine[In2, Out] = RuleEngine(in2 => self.update(f(in2)))
+    def contramap[In2](f: Facts[In2] => Facts[In]): RuleEngine[In2, Out] =
+      RuleEngine(in => self.update(f(in)))
 
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
       RuleEngine[In1, Out1](in => self.update(in).orElse(that.update(in)))
 
-    def updateWith[Out1 >: Out](in: In)(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 = self.update(in) match {
-      case None       => defaultOut
-      case Some(outs) => outs.reduceOption(combine).getOrElse(defaultOut)
-    }
+    def updateWith[Out1 >: Out](in: Facts[In])(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 =
+      self.update(in) match {
+        case None       => defaultOut
+        case Some(outs) => outs.reduceOption(combine).getOrElse(defaultOut)
+      }
 
   }
   object RuleEngine {
     val empty: RuleEngine[Any, Nothing] = RuleEngine(_ => None)
 
-    def collect[In, Out](pf: PartialFunction[In, Out]): RuleEngine[In, Out] =
-      RuleEngine(in => pf.lift(in).map(List(_)))
+    // Note:  not sense any longer cant pattern match on facts
+    // def collect[In, Out](pf: PartialFunction[Facts[In], Out]): RuleEngine[In, Out] =
+    //   RuleEngine(in => pf.lift(in).map(List(_)))
 
     def constant[Out](out: List[Out]): RuleEngine[Any, Out] = RuleEngine(_ => Some(out))
 
-    def fromFunction[In, Out](f: In => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
+    def fromFunction[In, Out](f: Facts[In] => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
 
-    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = RuleEngine(???)
+    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = RuleEngine(???) // TODO ?
   }
 
   final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
@@ -125,7 +128,11 @@ object declarative {
    * Contains a collection of facts, whose structure is described by a phantom
    * type parameter.
    */
-  sealed abstract case class Facts[Types] private (private val data: Map[FactDefinition[_], Any]) {
+  sealed abstract case class Facts[+Types] private (private val data: Map[FactDefinition[_], Any]) {
+
+    def ++[Types2](that: Facts[Types2]): Facts[Types & Types2] =
+      new Facts[Types & Types2](data ++ that.data) {}
+
     def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
       subset: Types <:< (Key, Value)
     ): Value =
@@ -243,10 +250,23 @@ object declarative {
 
     def tag: PrimitiveType[Value]
 
+    // Note: there is a way (self: FactDefinition[Key, Value] =>) to not use cast but cast is easiest...
+    // A constructor: Reads a value in a expr out of a FactDefinition - it could also have been on Expr
+    def get: Expr[(Key, Value), Value] = Expr.input(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]])
+
+    def set[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] =
+      Expr.fact(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]], value)
+
+    def :=[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] = set(value)
+
     override final def toString(): String = s"FactDefinition($name, $tag)"
   }
   object FactDefinition {
-    def apply[N <: Singleton with String, T](name0: N)(implicit paramType0: PrimitiveType[T]): FactDefinition[(N, T)] =
+
+    // Note Type  refinment
+    type KeyValue[K <: Singleton with String, V] = FactDefinition[(K, V)] { type Key = K; type Value = V }
+
+    def apply[N <: Singleton with String, T](name0: N)(implicit paramType0: PrimitiveType[T]): KeyValue[N, T] =
       new FactDefinition[(N, T)] {
         type Key   = N
         type Value = T
@@ -254,16 +274,16 @@ object declarative {
         def tag: PrimitiveType[T] = paramType0
       }
 
-    def boolean[N <: Singleton with String](name0: N): FactDefinition[(N, Boolean)] = FactDefinition[N, Boolean](name0)
+    def boolean[N <: Singleton with String](name0: N): KeyValue[N, Boolean] = FactDefinition[N, Boolean](name0)
 
-    def double[N <: Singleton with String](name0: N): FactDefinition[(N, Double)] = FactDefinition[N, Double](name0)
+    def double[N <: Singleton with String](name0: N): KeyValue[N, Double] = FactDefinition[N, Double](name0)
 
-    def int[N <: Singleton with String](name0: N): FactDefinition[(N, Int)] = FactDefinition[N, Int](name0)
+    def int[N <: Singleton with String](name0: N): KeyValue[N, Int] = FactDefinition[N, Int](name0)
 
-    def instant[N <: Singleton with String](name0: N): FactDefinition[(N, java.time.Instant)] =
+    def instant[N <: Singleton with String](name0: N): KeyValue[N, java.time.Instant] =
       FactDefinition[N, java.time.Instant](name0)
 
-    def string[N <: Singleton with String](name0: N): FactDefinition[(N, String)] = FactDefinition[N, String](name0)
+    def string[N <: Singleton with String](name0: N): KeyValue[N, String] = FactDefinition[N, String](name0)
   }
 
   // Store int, etc and get type out of it
@@ -396,7 +416,19 @@ object declarative {
   // Note: john suggests to go away from sealed trait Expr[-In, +Out]
   // to any values of In in memory or when evaluated Out so it could be phantom types
   // ... he suggests using hlist (complicated) or more simply use phantom types to solve the structured data problem
+
+  //
+  // Not: Facts[("age", Int)] with Facts[("name", String)] with Facts[("isMale", Boolean)]
+  // Goal: Facts[("age", Int) with ("name", String) with ("isMale", Boolean)]
+  // Fact[In] => Out
+  //
+  // // Fact[In] => Facts[Out]
   sealed trait Expr[-In, +Out] { self =>
+
+    final def ++[In1 <: In, Fields1, Fields2](that: Expr[In1, Facts[Fields2]])(implicit
+      ev: Out <:< Facts[Fields1]
+    ): Expr[In1, Facts[Fields1 & Fields2]] =
+      Expr.CombineFacts(self.widen[Facts[Fields1]], that)
 
     final def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
       Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Add, tag)
@@ -432,6 +464,9 @@ object declarative {
 
     final def >>>[Out2](that: Expr[Out, Out2]): Expr[In, Out2] = Expr.Pipe(self, that)
 
+    def ifTrue[In1 <: In, Out2](ifTrue: Expr[In1, Out2])(implicit ev: Out <:< Boolean): Expr.IfTrue[In1, Out2] =
+      Expr.IfTrue(self.widen[Boolean], ifTrue)
+
     def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen[Boolean])
 
     // Note: casting because its safe (tm)
@@ -445,6 +480,24 @@ object declarative {
     // implicit class ExprBoolSyntax[In](self: Expr[In, Boolean])
     // con that one do not give good error messages when `and and` on types not boolean
 
+    //
+    // IfTrue is a helper so we can write
+    Expr(true).ifTrue(42).otherwise(43)
+    final case class IfTrue[In, Out](condition: Expr[In, Boolean], ifTrue: Expr[In, Out]) extends Expr[In, Out] {
+      def otherwise(ifFalse: Expr[In, Out]): Expr[In, Out] = Expr.IfThenElse(condition)(ifTrue, ifFalse)
+    }
+
+    // Note: think of the following case classes constructors
+    //
+    // final case class Fact[K <: Singleton with String, V]()                      extends Expr[Any, Facts[(K, V)]] TODO
+    // `value: V` would not be flexible enough... so has to be Expr...
+    // In used so we can have Input ... Any not enough
+    final case class Fact[In, K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V], value: Expr[In, V])
+        extends Expr[In, Facts[(K, V)]]
+    final case class CombineFacts[In, V1, V2](
+      left: Expr[In, Facts[V1]],
+      right: Expr[In, Facts[V2]]
+    ) extends Expr[In, Facts[V1 & V2]]
     final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
     final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
     final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])  extends Expr[In, Boolean]
@@ -452,15 +505,18 @@ object declarative {
     final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
     final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
     // Niecetohave: division
-    final case class Input[In, Out](tag: PrimitiveType[Out])                             extends Expr[In, Out]
+    final case class Input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V])
+        extends Expr[(K, V), V] // (K, V) - because the input to our rule enginge will be facts
     final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
-
     final case class BinaryNumericOp[In, Out](
       lhs: Expr[In, Out],
       rhs: Expr[In, Out],
       op: NumericBinOpType,
       tag: Numeric[Out]
     ) extends Expr[In, Out]
+
+    final case class IfThenElse[In, Out](condition: Expr[In, Boolean])(ifTrue: Expr[In, Out], ifFalse: Expr[In, Out])
+        extends Expr[In, Out]
 
     sealed trait NumericBinOpType
     object NumericBinOpType {
@@ -473,9 +529,19 @@ object declarative {
 
     implicit def apply[Out](out: Out)(implicit tag: PrimitiveType[Out]): Expr[Any, Out] = Constant(out, tag)
 
-    def input[A](implicit tag: PrimitiveType[A]): Expr[A, A] = Input(tag)
+    def fact[In, K <: Singleton with String, V](
+      factDef: FactDefinition.KeyValue[K, V],
+      value: Expr[In, V]
+    ): Expr[In, Facts[(K, V)]] =
+      Fact(factDef, value)
 
-    def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ??? // TODO
+    // TODO
+    // def ifThenElse[In, Out](condition)
+
+    def input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V]): Expr[(K, V), V] = Input(factDef)
+
+    // Note: we use the fact /  ... approach
+    // def field[In, Out](name: String)(implicit tag: PrimitiveType[Out]): Expr[In, Out] = ??? // TODO
   }
 
   // Note: proof constrain types
@@ -510,14 +576,16 @@ object declarative {
 
     def constant[In](value: Boolean): Condition[In] = Condition(Expr(value))
 
-    def isEqualTo[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
-      Condition(Expr.input[In] === Expr(rhs))
+    // Note: not used for now likely let expr handle it
 
-    def isLessThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
-      Condition(Expr.input[In] < Expr(rhs))
+    // def isEqualTo[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+    //   Condition(Expr.input[In] === Expr(rhs))
 
-    def isGreaterThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
-      Condition(Expr.input[In] > Expr(rhs))
+    // def isLessThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+    //   Condition(Expr.input[In] < Expr(rhs))
+
+    // def isGreaterThan[In](rhs: In)(implicit tag: PrimitiveType[In]): Condition[In] =
+    //   Condition(Expr.input[In] > Expr(rhs))
 
     // Note: fromFunction can not be solved due to serialization
   }
@@ -550,7 +618,6 @@ object declarative {
   }
 
   object loyalty {
-
     // Note:
     // FlightBookStatus is not a type in Our world ... it would need some adjustments of `object Ordering {`
     //    case class Ordering2[A, B](orderingA: Ordering[A], orderingB: Ordering[B]) extends Ordering[(A, B)]
@@ -559,15 +626,39 @@ object declarative {
     import net.degoes.afd.examples.loyalty._
     import net.degoes.afd.examples.loyalty.LoyaltyTier._
 
-    val statusCondition: Condition[FlightBooking] = Condition(
-      Expr.field[FlightBooking, String]("status") === Expr("confirmed")
-    )
+    // Rule engine model of FlightBooking and FlightBookingStatus that can be understood outside scala
+    object FlightBooking {
+      val id       = FactDefinition.string("id")
+      val customer = FactDefinition.string("customer") // FIXME: Support nested data
+      val flight   = FactDefinition.string("flight")   // FIXME: Support nested data
+      val price    = FactDefinition.double("price")
+      val status   = FactDefinition.string("status")
+    }
+    object FlightBookingStatus {
+      val Confirmed = Expr("Confirmed")
+      val Cancelled = Expr("Cancelled")
+      val Pending   = Expr("Pending")
+    }
 
-    val priceCondition: Condition[FlightBooking] = Condition(
-      Expr.field[FlightBooking, Double]("price") === Expr(1000.0)
-    )
+    // FlightBooking.price.set(1000.0)
+    // // same as
+    // FlightBooking.price := 1000.0
 
-    statusCondition && priceCondition
+    val foo: Expr[Any, Facts[("price", Double)]] = (FlightBooking.price := 1000.0)
+
+    (FlightBooking.price    := 1000.0) ++
+      (FlightBooking.status := FlightBookingStatus.Confirmed)
+
+    val statusCondition = Condition(FlightBooking.status.get === FlightBookingStatus.Confirmed)
+
+    val priceCondition = Condition(FlightBooking.price.get > Expr(1000.0))
+
+    val both = statusCondition && priceCondition
+
+    // goal make an action that produces
+    // { "action_type": "add_points", "points": 100, "customer": "customer_id" }
+    // { "action_type": "upgrade_tier", "customer": "customer_id" }
+    // { "action_type": "downgrade_tier", "customer": "customer_id" }
 
   }
 }
