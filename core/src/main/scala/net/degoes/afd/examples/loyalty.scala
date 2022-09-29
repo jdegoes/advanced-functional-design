@@ -29,6 +29,13 @@ object LoyaltyTier {
 }
 
 object rewards {
+
+  def cannotWrite(left: LoyaltyProgram, right: LoyaltyProgram): LoyaltyProgram = ???
+
+  // TOOD take from screen
+  def canWrite(): LoyaltyProgram = ???
+
+  // Note: update loyalty program based on flight booking status
   def updateLoyaltyProgram(booking: FlightBooking, program: LoyaltyProgram): LoyaltyProgram =
     booking match {
       case FlightBooking(_, Customer(_, _, _, _), _, price, FlightBookingStatus.Confirmed) =>

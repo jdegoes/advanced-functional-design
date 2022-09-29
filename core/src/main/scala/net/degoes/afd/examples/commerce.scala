@@ -17,10 +17,23 @@ object Department {
 }
 
 object recommendations {
-  trait RecommendationStrategy {
+  trait RecommendationStrategy { self =>
     def recommend(product: Product): List[Product]
+    def ++(that: RecommendationStrategy): RecommendationStrategy = ???
   }
+
+  object RecommendationStrategy {
+    val none: RecommendationStrategy = new RecommendationStrategy {
+      def recommend(product: Product): List[Product] = Nil
+    }
+  }
+
   case object CrossSell extends RecommendationStrategy {
+
+    // Note: design small because of data mixed into logic...
+    // - other recommend def could be driven by ML ... this impl is based on a contractual agreement
+    //   like if you sell this product, you should also sell these products
+
     override def recommend(product: Product): List[Product] =
       product match {
         case Product(_, Manufacturer.Samsung, model, name, _, Department.Appliances) =>

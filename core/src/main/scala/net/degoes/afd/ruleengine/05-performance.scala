@@ -16,5 +16,5 @@ package net.degoes.afd.ruleengine
 object performance {
   import net.degoes.afd.ruleengine.declarative._
 
-  def execute[Input](input: Input, ruleSet: RuleSet) = ???
+  def execute[In, Out, Input](input: Input, ruleSet: RuleSet[In, Out]) = ???
 }

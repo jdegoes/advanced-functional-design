@@ -18,7 +18,7 @@ package net.degoes.afd.ruleengine
 object persistence {
   import net.degoes.afd.ruleengine.declarative._
 
-  def toJson(ruleSet: RuleSet): String = ???
+  def toJson[In, Out](ruleSet: RuleSet[In, Out]): String = ???
 
-  def fromJson(json: String): RuleSet = ???
+  def fromJson[In, Out](json: String): RuleSet[In, Out] = ???
 }
