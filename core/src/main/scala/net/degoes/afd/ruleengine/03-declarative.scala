@@ -61,7 +61,7 @@ object declarative {
         case FloatType   => scala.math.Ordering[Float]
         case DoubleType  => scala.math.Ordering[Double]
         case StringType  => scala.math.Ordering[String]
-        case InstantType => ??? // scala.math.Ordering[Long].on(java.time.Instant)(_.toEpochMilli) // TODO
+        case InstantType => scala.math.Ordering[Long].on[java.time.Instant](_.toEpochMilli)
       }
   }
 
@@ -72,15 +72,14 @@ object declarative {
   object EngineType {
     final case class Primitive[A](primitiveType: PrimitiveType[A]) extends EngineType[A] {
       def equals(left: A, right: A): Boolean   = primitiveType.ordering.equiv(left, right)
-      def LessThan(left: A, right: A): Boolean = primitiveType.ordering.lt(left, right)
+      def lessThan(left: A, right: A): Boolean = primitiveType.ordering.lt(left, right)
     }
     final case class Composite[Fields](factsType: FactsType[Fields]) extends EngineType[Facts[Fields]] {
       def equals(left: Facts[Fields], right: Facts[Fields]): Boolean   = ???
-      def LessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+      def lessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
     }
 
-    // TODO clean up the other ones and use theses
-    def fromPrimitiveType[A](primitiveType: PrimitiveType[A]): EngineType[A] = Primitive(primitiveType)
+    def fromPrimitive[A](implicit primitiveType: PrimitiveType[A]): EngineType[A] = Primitive(primitiveType)
 
     def fromFacts[Types](facts: Facts[Types]): EngineType[Facts[Types]] =
       EngineType.Composite(FactsType.fromFacts(facts))
@@ -148,6 +147,7 @@ object declarative {
   }
 
   // Note: argumentation its not needed to be serializable becuase condition and action would be serialized
+  // So we can go with case class (product) and do not need trait (sum)
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
 
   sealed trait Numeric[A] {
@@ -156,14 +156,11 @@ object declarative {
     import Expr.NumericBinOpType
     import Expr.NumericBinOpType._
 
-    // TODO remove this one
-    def numeric: scala.math.Numeric[A]
-
-    // TODO slide 14
-    // def add(left: A, right: A): A
-
-    // TODO remiove numeric scala math numeric stuff
-    // and add interpreters and implement them
+    // Note: interpreters
+    def add(left: A, right: A): A
+    def subtract(left: A, right: A): A
+    def multiply(left: A, right: A): A
+    // Niecetohave: Divide and modulo
 
     def primitiveType: PrimitiveType[A] =
       (this match {
@@ -176,31 +173,45 @@ object declarative {
       }).asInstanceOf[PrimitiveType[A]]
 
     def apply(binOp: Expr.NumericBinOpType)(left: A, right: A): A = binOp match {
-      case Add      => numeric.plus(left, right)
-      case Subtract => numeric.minus(left, right)
-      case Multiply => numeric.times(left, right)
-      case Divide   => ??? // numeric.div(left, right)
+      case Add      => add(left, right)
+      case Subtract => subtract(left, right)
+      case Multiply => multiply(left, right)
+      case Divide   => ???
       case Modulo   => ???
     }
   }
   object Numeric {
     implicit case object ByteIsNumeric extends Numeric[Byte] {
-      def numeric: scala.math.Numeric[Byte] = scala.math.Numeric[Byte]
+      def add(left: Byte, right: Byte): Byte      = (left + right).toByte
+      def subtract(left: Byte, right: Byte): Byte = (left - right).toByte
+      def multiply(left: Byte, right: Byte): Byte = (left * right).toByte
     }
     implicit case object CharIsNumeric extends Numeric[Char] {
-      def numeric: scala.math.Numeric[Char] = scala.math.Numeric[Char]
+      def add(left: Char, right: Char): Char      = (left + right).toChar
+      def subtract(left: Char, right: Char): Char = (left - right).toChar
+      def multiply(left: Char, right: Char): Char = (left + right).toChar
     }
     implicit case object IntIsNumeric extends Numeric[Int] {
-      def numeric: scala.math.Numeric[Int] = scala.math.Numeric[Int]
+      def add(left: Int, right: Int): Int      = (left + right).toInt
+      def subtract(left: Int, right: Int): Int = (left - right).toInt
+      def multiply(left: Int, right: Int): Int = (left + right).toInt
     }
     implicit case object LongIsNumeric extends Numeric[Long] {
-      def numeric: scala.math.Numeric[Long] = scala.math.Numeric[Long]
+      def add(left: Long, right: Long): Long      = (left + right).toLong
+      def subtract(left: Long, right: Long): Long = (left - right).toLong
+      def multiply(left: Long, right: Long): Long = (left + right).toLong
+
     }
     implicit case object FloatIsNumeric extends Numeric[Float] {
-      def numeric: scala.math.Numeric[Float] = scala.math.Numeric[Float]
+      def add(left: Float, right: Float): Float      = (left + right).toFloat
+      def subtract(left: Float, right: Float): Float = (left - right).toFloat
+      def multiply(left: Float, right: Float): Float = (left + right).toFloat
+
     }
     implicit case object DoubleIsNumeric extends Numeric[Double] {
-      def numeric: scala.math.Numeric[Double] = scala.math.Numeric[Double]
+      def add(left: Double, right: Double): Double      = (left + right).toDouble
+      def subtract(left: Double, right: Double): Double = (left - right).toDouble
+      def multiply(left: Double, right: Double): Double = (left + right).toDouble
     }
   }
 
@@ -245,6 +256,8 @@ object declarative {
       value: Value
     ): Facts[Types & (Key, Value)] =
       new Facts[Types & (Key, Value)](data + (FactDefinition.prim[Key, Value](name) -> value)) {}
+
+    def lessThan(that: Facts[_]): Boolean = false // TODO
 
     object unsafe {
       def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Option[Any] = data.get(pd)
@@ -416,38 +429,41 @@ object declarative {
   // Example of the singleton type in scala 2.13.*
   // val x = "foo"
   // x.type
-  final class DynamicRecord[Fields] private (private val map: Map[(String, PrimitiveType[_]), Any]) {
-    def ++(that: DynamicRecord[Fields]): DynamicRecord[Fields] =
-      new DynamicRecord(map ++ that.map)
+  object GenericTypeLevelWithSingletonTypes {
 
-    // Note: type out put (name.type, A) => ("fieldName", Int) ...
-    def add[A](name: String, value: A)(implicit tag: PrimitiveType[A]): DynamicRecord[Fields with (name.type, A)] =
-      new DynamicRecord(map.updated(name -> tag, value))
+    final class DynamicRecord[Fields] private (private val map: Map[(String, PrimitiveType[_]), Any]) {
+      def ++(that: DynamicRecord[Fields]): DynamicRecord[Fields] =
+        new DynamicRecord(map ++ that.map)
 
-    def get[A](name: String)(implicit tag: PrimitiveType[A], ev: Fields <:< (name.type, A)): Option[A] =
-      map.get(name -> tag).map(_.asInstanceOf[A])
+      // Note: type out put (name.type, A) => ("fieldName", Int) ...
+      def add[A](name: String, value: A)(implicit tag: PrimitiveType[A]): DynamicRecord[Fields with (name.type, A)] =
+        new DynamicRecord(map.updated(name -> tag, value))
+
+      def get[A](name: String)(implicit tag: PrimitiveType[A], ev: Fields <:< (name.type, A)): Option[A] =
+        map.get(name -> tag).map(_.asInstanceOf[A])
+
+    }
+    object DynamicRecord {
+      val empty: DynamicRecord[Any] = new DynamicRecord(Map())
+
+      // Note: this record do not hold age and will fail with compile error:
+      // Cannot prove that Any with (String("isMale"), Boolean) with (String("street"), String) <:< (String("age"), Int).
+      // DynamicRecord.empty
+      //   .add("isMale", true)
+      //   .add("street", "123 Main st")
+      //   .get[Int]("age")
+
+      DynamicRecord.empty
+        .add("age", 42)
+        .add("isMale", true)
+        .add("street", "123 Main st")
+        .get[Int]("age")
+    }
 
   }
-  object DynamicRecord {
-    val empty: DynamicRecord[Any] = new DynamicRecord(Map())
-
-    // Note: this record do not hold age and will fail with compile error:
-    // Cannot prove that Any with (String("isMale"), Boolean) with (String("street"), String) <:< (String("age"), Int).
-    // DynamicRecord.empty
-    //   .add("isMale", true)
-    //   .add("street", "123 Main st")
-    //   .get[Int]("age")
-
-    DynamicRecord.empty
-      .add("age", 42)
-      .add("isMale", true)
-      .add("street", "123 Main st")
-      .get[Int]("age")
-  }
-
   // Note: some type level hands on
   // using path dependent types works on all scala (tm)
-  object GenericTypeLevel101 {
+  object GenericTypeLevelWithPathDependentTypes {
 
     import PrimitiveType._
 
@@ -505,7 +521,7 @@ object declarative {
     testRecord2.get(street)
   }
 
-  object PhantomType101 {
+  object PhantomTypeRecap {
     // Note: recap phantom type used in ZIO like
     // ZIO[Console & Logging & Database & Int & String, Throwable, Unit]
     // no values of this type... used as guard on compile time
@@ -607,7 +623,7 @@ object declarative {
 
     //
     // IfTrue is a helper so we can write
-    Expr(true).ifTrue(42).otherwise(43)
+    // Expr(true).ifTrue(42).otherwise(43)
     final case class IfTrue[In, Out](condition: Expr[In, Boolean], ifTrue: Expr[In, Out]) extends Expr[In, Out] {
       def otherwise(ifFalse: Expr[In, Out]): Expr[In, Out] = Expr.IfThenElse(condition, ifTrue, ifFalse)
     }
@@ -658,47 +674,61 @@ object declarative {
     implicit def apply[Out](out: Facts[Out]): Expr[Any, Facts[Out]] =
       Constant(out, Facts.engineTypeOf[Out](out))
 
-    // Note: possibel signature to solve right == left
+    // Note: possible signature to solve right == left
     // def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (PrimitiveType[Out], Out)
-    // will not work becuase we do not have Facts of PrimitiveType...
+    // will not work because we do not have Facts of PrimitiveType...
 
     def eval[In, Out](in: Facts[In], expr: Expr[In, Out]): Out =
       evalWithType(in, expr)._2
 
     def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (EngineType[Out], Out) = expr match {
       case IfTrue(condition, ifTrue) => ???
-      case Fact(factDef, value) =>
-        implicit val tag = factDef.tag
-        // Facts.empty.add(factDef, value)
+      case Fact(factDef, value)      =>
+        // factDef: FactDefinition.KeyValue[Singleton with String, Any], value: Expr[Nothing, Any]
+        // TODO: something is fishy with the types ^^
+        // implicit val tag = factDef.tag
+        // val result       = Facts.empty.add(factDef, value)
+        // (EngineType.fromFacts(result).asInstanceOf[EngineType[Out]], result)
         ???
-      case CombineFacts(left, right) => ???
-      case Constant(value, tag)      => ???
+      case CombineFacts(lhs, rhs) =>
+        val left  = eval(in, lhs)
+        val right = eval(in, rhs)
+
+        val result = left ++ right
+
+        (EngineType.fromFacts(result).asInstanceOf[EngineType[Out]], result)
+      case Constant(value, tag) => (tag.asInstanceOf[EngineType[Out]], value)
       case And(lhs, rhs) =>
         val left  = eval(in, lhs)
         val right = eval(in, rhs)
-        left && right
-        ???
+        (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left && right)
       case Or(lhs, rhs) =>
         val left  = eval(in, lhs)
         val right = eval(in, rhs)
-        left || right
-        ???
-
-      case Not(condition) => ???
+        (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left || right)
+      case Not(condition) =>
+        (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], !eval(in, condition))
       case EqualTo(lhs, rhs) =>
-        val left  = eval(in, lhs)
-        val right = eval(in, rhs)
-        left == right // TODO might not be correct for all types
-        ???
+        val (leftType, left) = evalWithType(in, lhs)
+        val right            = eval(in, rhs)
+
+        import PrimitiveType._
+
+        (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], leftType.equals(left, right))
       case LessThan(lhs, rhs) =>
-        // Slide 50
-        ??? // TODO might not be correct for all types
+        val (leftType: EngineType[Any], left) = evalWithType(in, lhs)
+        val right                             = eval(in, rhs)
+
+        import PrimitiveType._
+
+        // (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], leftType.lessThan(left, right))
+        // TODO: `object EngineType > Primitive > def lessThan` is there 🤔
+        (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], ???)
       case Input(factDef) =>
         val fieldValue = Unsafe.unsafe { implicit u =>
           in.unsafe.get(factDef)
         }
-        fieldValue.asInstanceOf[Out]
-        ???
+        factDef.tag -> fieldValue.asInstanceOf[Out]
       case Pipe(left, right) => ???
       case BinaryNumericOp(lhs, rhs, op, tag0) =>
         val tag = tag0.asInstanceOf[Numeric[Out]]
@@ -747,9 +777,8 @@ object declarative {
 
     def ||[In1 <: In](that: Condition[In1]): Condition[In1] = Condition(
       self.expr || that.expr
-    ) // TODO mention that there is maybe an error &&
+    )
 
-    // TODO
     def eval(facts: Facts[In]): Boolean = expr.eval(facts)
 
     def unary_! : Condition[In] = Condition(!expr)
@@ -799,11 +828,10 @@ object declarative {
 
     def eval(facts: Facts[In]): List[Out] =
       self match {
-        case Action.Concat(left, right: Action[In, Out]) => ???
-        // left.eval(facts) ++ right.eval(facts)
+        case Action.Concat(left, right) =>
+          left.eval(facts) ++ right.eval(facts)
 
-        case Action.Pipe(left, right) =>
-          ???
+        case Action.Pipe(left, right) => ???
 
         case Action.FromExpr(expr) =>
           List(expr.eval(facts))
@@ -811,7 +839,7 @@ object declarative {
     // Niecetohave: zip, at least it do not have scala functions in the executaable encoding imple
   }
   object Action { self =>
-    final case class Concat[In, Out1, Out2](left: Action[In, Out1], right: Action[In, Out2]) extends Action[In, Out2]
+    final case class Concat[In, Out](left: Action[In, Out], right: Action[In, Out])          extends Action[In, Out]
     final case class Pipe[In, Out1, Out2](left: Action[In, Out1], right: Action[Out1, Out2]) extends Action[In, Out2]
     final case class FromExpr[In, Out](expr: Expr[In, Out])                                  extends Action[In, Out]
 
