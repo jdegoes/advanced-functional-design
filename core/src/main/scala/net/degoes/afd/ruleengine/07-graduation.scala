@@ -19,15 +19,6 @@ import scala.language.implicitConversions
  */
 object graduation {
 
-  final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
-
-  final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]])
-
-  object RuleSet {
-    val empty: RuleSet[Any, Nothing] = RuleSet(Vector.empty)
-  }
-
-
   sealed trait Numeric[A]
   object Numeric {
     implicit case object ByteIsNumeric    extends Numeric[Byte]
@@ -110,6 +101,9 @@ object graduation {
 
   object Expr {
 
+    final case class Fact[In, K <: Singleton with String, V](
+      factDef: FactDefinition.KeyValue[K, V], 
+      value: Expr[In, V]) extends Expr[In, Facts[(K, V)]]
     final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
     final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
     final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])  extends Expr[In, Boolean]
@@ -140,6 +134,7 @@ object graduation {
     def input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V]): Expr[(K, V), V] =
         Input(factDef)
 
+    def fact[In, K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V], value: Expr[In, V]) = Fact(factDef, value)
   }
 
   sealed trait FactDefinition[KeyValue] { self =>
@@ -153,6 +148,11 @@ object graduation {
     // Added
     def get: Expr[(Key, Value), Value] = Expr.input(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]])
 
+    def set[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] =
+      Expr.fact(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]], value)
+
+    def := [In](value: Expr[In, Value]) = set(value)
+    
     override final def toString(): String = s"FactDefinition($name, $paramType)"
   }
 
@@ -189,14 +189,14 @@ object graduation {
 
   }
 
-  final case class RuleEngine[-In, +Out](update: In => Option[List[Out]]) { self =>
-    def contramap[In2](f: In2 => In): RuleEngine[In2, Out] = 
+  final case class RuleEngine[-In, +Out](update: Facts[In] => Option[List[Out]]) { self =>
+    def contramap[In2](f: Facts[In2] => Facts[In]): RuleEngine[In2, Out] = 
       RuleEngine(in => self.update(f(in))) 
       
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
         RuleEngine(in => self.update(in) orElse that.update(in))
 
-    def updateWith[Out1 >: Out](in: In)(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 =
+    def updateWith[Out1 >: Out](in: Facts[In])(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 =
       self.update(in) match {
         case None => defaultOut
         case Some(outs) => 
@@ -204,11 +204,46 @@ object graduation {
       }
   }
 
+  object RuleEngine {
+    val empty: RuleEngine[Any, Nothing] = RuleEngine(_ => None)
+
+    def constant[Out](out: Out): RuleEngine[Any, Out] = fromFunction(_ => out)
+
+    def fromFunction[In, Out](f: Facts[In] => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
+
+    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = 
+      RuleEngine(???)
+  }
+
+  final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
+
+  final case class RuleSet[-In, +Out](rules: Vector[Rule[In, Out]]) { self =>
+    
+    def + [In1 <: In, Out1 >: Out](that: Rule[In1, Out1]): RuleSet[In1, Out1] = 
+      RuleSet(self.rules :+ that)
+    
+    def ++[In1 <: In, Out1 >: Out](that: RuleSet[In1, Out1]): RuleSet[In1, Out1] =
+      RuleSet(self.rules ++ that.rules)
+    
+    def addRule[In1 <: In, Out1 >: Out](that: Rule[In1, Out1]): RuleSet[In1, Out1] = 
+      self + that
+  }
+
+  object RuleSet {
+    
+    def apply[In, Out](rule1: Rule[In, Out], rules: Rule[In, Out]*): RuleSet[In, Out] =
+      RuleSet(rule1 +: rules.toVector)
+
+    val empty: RuleSet[Any, Nothing] = RuleSet(Vector.empty)
+
+  }
+
+
   /**
    * Contains a collection of facts, whose structure is described by a phantom
    * type parameter.
    */
-  sealed abstract case class Facts[Types] private (private val data: Map[FactDefinition[_], Any]) {
+  sealed abstract case class Facts[+Types] private (private val data: Map[FactDefinition[_], Any]) {
     def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
       subset: Types <:< (Key, Value)
     ): Value =
@@ -371,6 +406,8 @@ object graduation {
         val Cancelled = Expr("Cancelled")
         val Pending   = Expr("Pending")
     }
+
+    FlightBooking.price := FlightBooking.price.get + 1000.0
 
     val statusCondition = 
       Condition(FlightBooking.status.get === FlightBookingStatus.Confirmed)
