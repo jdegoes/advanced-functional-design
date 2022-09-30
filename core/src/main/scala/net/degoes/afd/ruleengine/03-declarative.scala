@@ -333,8 +333,8 @@ object declarative {
     def fromFunction[In, Out](f: In => Out): RuleEngine[In, Out] =
       RuleEngine(in => Some(List(f(in))))
 
-    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = ???
-//      RuleEngine(ruleSet.update)
+    def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] =
+      RuleEngine(execute(ruleSet, _: In))
 
     private def execute[In, Out](ruleSet: RuleSet[In, Out], in: In): Option[List[Out]] =
       ruleSet.rules.find(_.condition.eval(in)).map { rule =>
