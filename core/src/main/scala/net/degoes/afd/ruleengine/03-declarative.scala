@@ -368,51 +368,83 @@ object declarative {
     final def ++[In1 <: In, Fields1, Fields2](that: Expr[In1, Facts[Fields2]])(implicit
       ev: Out <:< Facts[Fields1]
     ): Expr[In1, Facts[Fields1 & Fields2]] =
-      Expr.CombineFacts(self.widen[Facts[Fields1]], that)
-    def &&[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
-      Expr.And(self.widen, that)
+      Expr.CombineFacts(self.widenOut[Facts[Fields1]], that)
+    def &&[In1 <: In, Fields1, Fields2](that: Expr[Facts[Fields2], Boolean])(implicit
+      ev: In1 <:< Facts[Fields1],
+      evOut: Out <:< Boolean
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
+      Expr.And(self.widenOut.widenIn, that)
 
-    def ||[In1 <: In](that: Expr[In1, Boolean])(implicit ev: Out <:< Boolean): Expr[In1, Boolean] =
-      Expr.Or(self.widen, that)
+    def ||[In1 <: In, In2 <: In, Fields1, Fields2](that: Expr[Facts[Fields2], Boolean])(implicit
+      ev: In1 <:< Facts[Fields1],
+      evOut: Out <:< Boolean
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
+      Expr.Or(self.widenOut.widenIn, that)
 
-    def ===[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
-      Expr.EqualTo(self.widen, that)
+    def ===[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
+      Expr.EqualTo(self.widenIn, that)
 
-    def !=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+    def !=[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
       !(self === that)
 
-    def <[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
-      Expr.LessThan(self.widen, that)
+    def <[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
+      Expr.LessThan(self.widenIn, that)
 
-    def <=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
-      (self.widen < that) || (self === that)
+    def <=[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
+      (self.widenOut < that) || (self === that)
 
-    def >[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+    def >[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
       !(self <= that)
-    def >=[In1 <: In, Out1 >: Out](that: Expr[In1, Out1]): Expr[In1, Boolean] =
+    def >=[In1 <: In, Out1 >: Out, Fields1, Fields2](that: Expr[Facts[Fields2], Out1])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Expr[Facts[Fields1 & Fields2], Boolean] =
       !(self < that)
 
-    def *[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
-      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Multiply, numeric)
+    def *[In1 <: In, Out1 >: Out, Fields1, Fields2](
+      that: Expr[Facts[Fields2], Out1]
+    )(implicit numeric: Numeric[Out1], ev: In1 <:< Facts[Fields1]): Expr[Facts[Fields1 & Fields2], Out1] =
+      Expr.BinaryNumericOp(self.widenIn, that.widenOut, Expr.NumericBinOpType.Multiply, numeric)
 
-    def /[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
-      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Divide, numeric)
+    def /[In1 <: In, Out1 >: Out, Fields1, Fields2](
+      that: Expr[Facts[Fields2], Out1]
+    )(implicit numeric: Numeric[Out1], ev: In1 <:< Facts[Fields1]): Expr[Facts[Fields1 & Fields2], Out1] =
+      Expr.BinaryNumericOp(self.widenIn, that.widenOut, Expr.NumericBinOpType.Divide, numeric)
 
-    def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
-      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Add, numeric)
+    def +[In1 <: In, Out1 >: Out, Fields1, Fields2](
+      that: Expr[Facts[Fields2], Out1]
+    )(implicit numeric: Numeric[Out1], ev: In1 <:< Facts[Fields1]): Expr[Facts[Fields1 & Fields2], Out1] =
+      Expr.BinaryNumericOp(self.widenIn, that.widenOut, Expr.NumericBinOpType.Add, numeric)
 
-    def -[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit numeric: Numeric[Out1]): Expr[In1, Out1] =
-      Expr.BinaryNumericOp(self.widen, that.widen, Expr.NumericBinOpType.Subtract, numeric)
+    def -[In1 <: In, Out1 >: Out, Fields1, Fields2](
+      that: Expr[Facts[Fields2], Out1]
+    )(implicit numeric: Numeric[Out1], ev: In1 <:< Facts[Fields1]): Expr[Facts[Fields1 & Fields2], Out1] =
+      Expr.BinaryNumericOp(self.widenIn, that.widenOut, Expr.NumericBinOpType.Subtract, numeric)
 
-    def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widen)
+    def unary_!(implicit ev: Out <:< Boolean): Expr[In, Boolean] = Expr.Not(self.widenOut)
 
     def ifTrue[In1 <: In, Out1 >: Out](thenExpr: Expr[In1, Out1])(implicit
       ev: Out <:< Boolean
     ): Expr.IfTrue[In1, Out1] =
-      Expr.IfTrue(self.widen, thenExpr)
+      Expr.IfTrue(self.widenOut, thenExpr)
 
-    def widen[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] =
+    def widenOut[Out2](implicit ev: Out <:< Out2): Expr[In, Out2] =
       self.asInstanceOf[Expr[In, Out2]]
+
+    def widenIn[In1 <: In, In2, Fields1, Fields2](implicit
+      ev: In1 <:< Facts[Fields1],
+      ev2: In2 <:< Facts[Fields2]
+    ): Expr[In2, Out] =
+      self.asInstanceOf[Expr[In2, Out]]
   }
 
   object Generic {
@@ -592,10 +624,14 @@ object declarative {
   }
 
   final case class Condition[-In](expr: Expr[In, Boolean]) { self =>
-    def &&[In1 <: In](that: Condition[In1]): Condition[In1] =
+    def &&[In1 <: In, Fields1, Fields2](that: Condition[Facts[Fields2]])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Condition[Facts[Fields1 & Fields2]] =
       Condition(self.expr && that.expr)
 
-    def ||[In1 <: In](that: Condition[In1]): Condition[In1] =
+    def ||[In1 <: In, Fields1, Fields2](that: Condition[Facts[Fields2]])(implicit
+      ev: In1 <:< Facts[Fields1]
+    ): Condition[Facts[Fields1 & Fields2]] =
       Condition(self.expr || that.expr)
 
     def unary_! : Condition[In] = Condition(!self.expr)
@@ -671,7 +707,7 @@ object declarative {
       val Pending   = FactDefinition.string("Pending")
     }
 
-    val statusCondition: Condition[Facts[("Confirmed", String)] with Facts[("status", String)]] =
+    val statusCondition: Condition[Facts[("status", String) & ("Confirmed", String)]] =
       Condition(FlightBooking.status.get === FlightBookingStatus.Confirmed.get)
 
     val priceCondition: Condition[Facts[("price", Double)]] =
