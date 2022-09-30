@@ -50,6 +50,10 @@ object graduation {
   }
 
   sealed trait Expr[-In, +Out] { self =>
+    
+    final def ++[In1 <: In, Fields1, Fields2](that: Expr[In1, Facts[Fields2]])(implicit ev: Out <:< Facts[Fields1]): Expr[In1, Facts[Fields1 & Fields2]] =
+      Expr.CombineFacts(self.widen[Facts[Fields1]], that)
+
     final def +[In1 <: In, Out1 >: Out](that: Expr[In1, Out1])(implicit tag: Numeric[Out1]): Expr[In1, Out1] =
       Expr.BinaryNumericOp(self.widen, that, Expr.NumericBinOpType.Add, tag)
 
@@ -104,6 +108,10 @@ object graduation {
     final case class Fact[In, K <: Singleton with String, V](
       factDef: FactDefinition.KeyValue[K, V], 
       value: Expr[In, V]) extends Expr[In, Facts[(K, V)]]
+      final case class CombineFacts[In, V1, V2](
+        left: Expr[In, Facts[V1]],
+        right: Expr[In, Facts[V2]]
+      ) extends Expr[In, Facts[V1 & V2]]
     final case class Constant[Out](value: Out, tag: PrimitiveType[Out])         extends Expr[Any, Out]
     final case class And[In](left: Expr[In, Boolean], right: Expr[In, Boolean]) extends Expr[In, Boolean]
     final case class Or[In](left: Expr[In, Boolean], right: Expr[In, Boolean])  extends Expr[In, Boolean]
@@ -111,7 +119,7 @@ object graduation {
     final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
     final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
     final case class Input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V])
-        extends Expr[(K, V), V]
+        extends Expr[(K, V), V] // TODO : split into READ & GET operators
     final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
     final case class BinaryNumericOp[In, Out](
       lhs: Expr[In, Out],
@@ -244,6 +252,9 @@ object graduation {
    * type parameter.
    */
   sealed abstract case class Facts[+Types] private (private val data: Map[FactDefinition[_], Any]) {
+    def ++ [Types2](that: Facts[Types2]): Facts[Types & Types2] =
+      new Facts[Types & Types2](data ++ that.data) {}
+
     def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
       subset: Types <:< (Key, Value)
     ): Value =
@@ -407,7 +418,7 @@ object graduation {
         val Pending   = Expr("Pending")
     }
 
-    FlightBooking.price := FlightBooking.price.get + 1000.0
+    (FlightBooking.price := FlightBooking.price.get + 1000.0) ++ (FlightBooking.status := FlightBookingStatus.Pending)
 
     val statusCondition = 
       Condition(FlightBooking.status.get === FlightBookingStatus.Confirmed)
