@@ -28,7 +28,7 @@ addCommandAlias("check", "all root/scalafmtSbtCheck root/scalafmtCheckAll")
 
 scalacOptions in ThisBuild ++= Seq("-deprecation", "-feature")
 
-lazy val root = project
+lazy val advancedFunctionalDesign = project
   .in(file("."))
   .settings(
     publish / skip := true,
