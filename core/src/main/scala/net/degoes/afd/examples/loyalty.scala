@@ -12,7 +12,7 @@ final case class FlightBooking(
   status: FlightBookingStatus
 )
 
-sealed trait FlightBookingStatus
+sealed trait FlightBookingStatus extends Product
 object FlightBookingStatus {
   case object Pending   extends FlightBookingStatus
   case object Confirmed extends FlightBookingStatus
@@ -26,6 +26,18 @@ object LoyaltyTier {
   case object Bronze extends LoyaltyTier
   case object Silver extends LoyaltyTier
   case object Gold   extends LoyaltyTier
+
+  def next(tier: LoyaltyTier): LoyaltyTier = tier match {
+    case Bronze => Silver
+    case Silver => Gold
+    case Gold   => Gold
+  }
+
+  def previous(tier: LoyaltyTier): LoyaltyTier = tier match {
+    case Bronze => Bronze
+    case Silver => Bronze
+    case Gold   => Silver
+  }
 }
 
 object rewards {

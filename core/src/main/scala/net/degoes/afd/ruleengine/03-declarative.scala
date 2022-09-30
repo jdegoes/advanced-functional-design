@@ -182,10 +182,10 @@ object declarative {
     def tag: EngineType[Value]
 
     def self: FactDefinition.KeyValue[Key, Value] =
-      self.asInstanceOf[FactDefinition.KeyValue[Key, Value]]
+      this.asInstanceOf[FactDefinition.KeyValue[Key, Value]]
 
     val singletonType: EngineType[Facts[(Key, Value)]] =
-      EngineType.Composite(FactsType.empty.add[(Key, Value)](self.asInstanceOf[FactDefinition[(Key, Value)]]))
+      EngineType.Composite(FactsType.empty.add[(Key, Value)](self))
 
     def get: Expr[Facts[(Key, Value)], Value] = {
       val fields: Expr[Facts[(Key, Value)], Facts[(Key, Value)]] =
@@ -194,7 +194,7 @@ object declarative {
     }
 
     def set[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] =
-      Expr.fact(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]], value)
+      Expr.fact(self, value)
 
     def :=[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] = set(value)
 
@@ -375,7 +375,7 @@ object declarative {
     ): Expr[Facts[Fields1 & Fields2], Boolean] =
       Expr.And(self.widenOut.widenIn, that)
 
-    def ||[In1 <: In, In2 <: In, Fields1, Fields2](that: Expr[Facts[Fields2], Boolean])(implicit
+    def ||[In1 <: In, Fields1, Fields2](that: Expr[Facts[Fields2], Boolean])(implicit
       ev: In1 <:< Facts[Fields1],
       evOut: Out <:< Boolean
     ): Expr[Facts[Fields1 & Fields2], Boolean] =
@@ -647,8 +647,10 @@ object declarative {
 
   sealed trait Action[-In, +Out] {
     self =>
-    def ++[In1 <: In, Out1 >: Out](that: Action[In1, Out1]): Action[In1, Out1] =
-      Action.Concat(self, that)
+    def ++[In1 <: In, Out1 >: Out, Fields1, Fields2, Fields3, Fields4](
+      that: Action[Facts[Fields2], Facts[Fields4]]
+    )(implicit ev: In1 <:< Facts[Fields1], evOut: Out1 <:< Facts[Fields3]): Action[Facts[Fields1 & Fields2], Facts[Fields3 & Fields4]] =
+      Action.Concat(self, that).asInstanceOf[Action[Facts[Fields1 & Fields2], Facts[Fields3 & Fields4]]]
 
     def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] =
       Action.Pipe(self, that)
