@@ -250,7 +250,7 @@ object graduation {
     final def >>>[Out2](that: Expr[Out, Out2]): Expr[In, Out2] =
       Expr.Pipe(self, that)
 
-    def eval(in: Facts[In]): Out = Expr.eval(in, self)
+    def eval(in: In): Out = Expr.eval(in, self)
 
     def ifTrue[In1 <: In, Out2](ifTrue: Expr[In1, Out2])(implicit ev: Out <:< Boolean): Expr.IfTrue[In1, Out2] =
       Expr.IfTrue(self.widen[Boolean], ifTrue)
@@ -263,8 +263,6 @@ object graduation {
   }
 
   object Expr {
-
-    Expr(true).ifTrue(42).otherwise(43)
 
     final case class IfTrue[In, Out](condition: Expr[In, Boolean], ifTrue: Expr[In, Out]) {
       def otherwise(ifFalse: Expr[In, Out]) = IfThenElse(condition, ifTrue, ifFalse)
@@ -282,8 +280,8 @@ object graduation {
     final case class Not[In](condition: Expr[In, Boolean])                      extends Expr[In, Boolean]
     final case class EqualTo[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])   extends Expr[In, Boolean]
     final case class LessThan[In, Out](lhs: Expr[In, Out], rhs: Expr[In, Out])  extends Expr[In, Boolean]
-    final case class Input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V])
-        extends Expr[(K, V), V] // TODO : split into READ & GET operators
+    final case class Input[In](engineType: EngineType[In]) extends Expr[In, In]
+    final case class Get[In, K <: Singleton with String, V](expr: Expr[In, Facts[(K, V)]], factDef: FactDefinition.KeyValue[K, V]) extends Expr[In, V]
     final case class Pipe[In, Out1, Out2](left: Expr[In, Out1], right: Expr[Out1, Out2]) extends Expr[In, Out2]
     final case class BinaryNumericOp[In, Out](
       lhs: Expr[In, Out],
@@ -309,9 +307,9 @@ object graduation {
       Constant(out, EngineType.fromFacts(out))
 
       
-    def eval[In, Out](in: Facts[In], expr: Expr[In, Out]): Out = evalWithType(in, expr)._2
+    private def eval[In, Out](in: In, expr: Expr[In, Out]): Out = evalWithType(in, expr)._2
 
-    def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (EngineType[Out], Out) = 
+    private def evalWithType[In, Out](in: In, expr: Expr[In, Out]): (EngineType[Out], Out) = 
       expr match {
         case Fact(factDef, value) => 
           implicit val tag = factDef.tag
@@ -333,7 +331,7 @@ object graduation {
           val right = eval(in, rhs)
           (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left && right)
 
-        case Or(lhs, rhs) => ???
+        case Or(lhs, rhs) =>
           val left = eval(in, lhs)
           val right = eval(in, rhs)
           (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left || right)
@@ -359,13 +357,18 @@ object graduation {
           (EngineType.fromPrimitive(PrimitiveType[Boolean]).asInstanceOf[EngineType[Out]],
           leftType.lessThan(left, right))
 
-        case Input(factDef) => 
-          val fieldValue = Unsafe.unsafe { implicit u =>
-            in.unsafe.get(factDef)
-          }
-          factDef.tag -> fieldValue.asInstanceOf[Out] // no need to cast it to Out ?
+        case Input(engineType) => 
+          engineType.asInstanceOf[EngineType[Out]] -> in.asInstanceOf[Out]
+          
+        case Get(expr, fd) =>
+          val facts = eval(in, expr)
 
-        case Pipe(left, right) => ???
+          val value = Unsafe.unsafe { implicit u =>
+            facts.unsafe.get(fd).asInstanceOf[Out]
+          }
+          (fd.tag.asInstanceOf[EngineType[Out]],value)
+        
+        case Pipe(lhs, rhs) => evalWithType(eval(in, lhs), rhs)          
           
         case BinaryNumericOp(lhs, rhs, op, tag0) => 
           val tag = tag0.asInstanceOf[Numeric[Out]]
@@ -388,8 +391,7 @@ object graduation {
     )(ifTrue: Expr[In, Out], ifFalse: Expr[In, Out]): Expr[In, Out] =
       Expr.IfThenElse(condition, ifTrue, ifFalse)
 
-    def input[K <: Singleton with String, V](factDef: FactDefinition.KeyValue[K, V]): Expr[(K, V), V] =
-      Input(factDef)
+    def input[A](engineType: EngineType[A]): Expr[A, A] = Input(engineType)
 
   }
 
@@ -408,7 +410,7 @@ object graduation {
       new FactsType(facts.definitions)
   }
   
-  sealed trait FactDefinition[KeyValue] { self =>
+  sealed trait FactDefinition[KeyValue] { self0 =>
     type Key <: Singleton with String
     type Value
 
@@ -416,11 +418,18 @@ object graduation {
 
     def tag: EngineType[Value]
 
-    // Added
-    def get: Expr[(Key, Value), Value] = Expr.input(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]])
+    def self: FactDefinition.KeyValue[Key, Value] = self0.asInstanceOf[FactDefinition.KeyValue[Key, Value]]
 
+    val singletonType: EngineType[Facts[(Key, Value)]] = EngineType.Composite(FactsType.empty.add[(Key, Value)](self))
+
+    def get: Expr[Facts[(Key, Value)], Value] = {
+      val factsExpr = Expr.input(singletonType)
+
+      Expr.Get(factsExpr, self)
+    }
+    
     def set[In](value: Expr[In, Value]): Expr[In, Facts[(Key, Value)]] =
-      Expr.fact(self.asInstanceOf[FactDefinition.KeyValue[Key, Value]], value)
+      Expr.fact(self, value)
 
     def :=[In](value: Expr[In, Value]) = set(value)
 
@@ -472,14 +481,14 @@ object graduation {
 
   }
 
-  final case class RuleEngine[-In, +Out](update: Facts[In] => Option[List[Out]]) { self =>
-    def contramap[In2](f: Facts[In2] => Facts[In]): RuleEngine[In2, Out] =
+  final case class RuleEngine[-In, +Out](update: In => Option[List[Out]]) { self =>
+    def contramap[In2](f: In2 => In): RuleEngine[In2, Out] =
       RuleEngine(in => self.update(f(in)))
 
     def orElse[In1 <: In, Out1 >: Out](that: RuleEngine[In1, Out1]): RuleEngine[In1, Out1] =
       RuleEngine(in => self.update(in) orElse that.update(in))
 
-    def updateWith[Out1 >: Out](in: Facts[In])(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 =
+    def updateWith[Out1 >: Out](in: In)(defaultOut: Out1, combine: (Out1, Out1) => Out1): Out1 =
       self.update(in) match {
         case None => defaultOut
         case Some(outs) =>
@@ -492,15 +501,15 @@ object graduation {
 
     def constant[Out](out: Out): RuleEngine[Any, Out] = fromFunction(_ => out)
 
-    def fromFunction[In, Out](f: Facts[In] => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
+    def fromFunction[In, Out](f: In => Out): RuleEngine[In, Out] = RuleEngine(in => Some(List(f(in))))
 
     def fromRuleSet[In, Out](ruleSet: RuleSet[In, Out]): RuleEngine[In, Out] = {
-      val update: Facts[In] => Option[List[Out]] = execute(ruleSet, _)
+      val update: In => Option[List[Out]] = execute(ruleSet, _)
 
       RuleEngine(update)
     }
 
-    private def execute[In, Out](ruleSet: RuleSet[In, Out], in: Facts[In]): Option[List[Out]] =
+    private def execute[In, Out](ruleSet: RuleSet[In, Out], in: In): Option[List[Out]] =
       ruleSet.rules.find(_.condition.eval(in)).map { rule =>
         rule.action.eval(in)
       }
@@ -572,7 +581,7 @@ object graduation {
 
 
     object unsafe {
-      def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Option[Any] = data.get(pd)
+      def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Any = data(pd)
     }
   }
   object Facts {
@@ -589,7 +598,7 @@ object graduation {
 
   final case class Condition[-In](expr: Expr[In, Boolean]) { self =>
 
-    def eval(facts: Facts[In]) = expr.eval(facts)
+    def eval(in: In) = expr.eval(in)
 
     def &&[In1 <: In](that: Condition[In1]): Condition[In1] =
       Condition(self.expr && that.expr)
@@ -614,15 +623,15 @@ object graduation {
     def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] =
       Action.Pipe(self, that)
 
-    def eval(facts: Facts[In]): List[Out] = 
+    def eval(in: In): List[Out] = 
         self match {
           case Action.Concat(left, right) =>
-            left.eval(facts) ++ right.eval(facts)
+            left.eval(in) ++ right.eval(in)
 
-          case Action.Pipe(left, right) => ???
+          case Action.Pipe(lhs, rhs) => lhs.eval(in).flatMap(rhs.eval(_))
           
           case Action.FromExpr(expr) =>
-            List(expr.eval(facts))
+            List(expr.eval(in))
         }
   }
   object Action {
@@ -678,16 +687,53 @@ object graduation {
       val points = FactDefinition.int("points")
     }
 
-    val isConfirmed = FlightBooking.status.get === FlightBookingStatus.Confirmed
-    val isExpensive = FlightBooking.price.get > 1000.0
+    object LoyaltyAction {
+      val actionType = FactDefinition.string("action_type")
+      val points = FactDefinition.int("points")
+      val customer = FactDefinition.string("customer")
 
-    //val setGold        = LoyaltyProgram.tier   := Action.fromExpr(Gold.toString)
-    val increasePoints = LoyaltyProgram.points := LoyaltyProgram.points.get + 100
+      def update(program: LoyaltyProgram, action: Facts[_]): LoyaltyProgram =
+         Unsafe.unsafe { implicit u =>
+          action.unsafe.get(actionType) match {
+            case ActionType.DowngradeTier => program.copy(tier = LoyaltyTier.Bronze)
+            case ActionType.UpgradeTier => program.copy(tier = LoyaltyTier.Gold)
+            case ActionType.AddPoints => action.unsafe.get(points) match {
+              case Expr.Constant(value: Int, _) => program.copy(points = value)
+              case _ => program
+            }
+            case _ => program
+          } 
+        }
+      
+      def update(program: LoyaltyProgram, actions: List[Facts[_]]) : LoyaltyProgram =
+        actions.foldLeft(program)( (program, action) => update(program, action))
+    }
+    
+    object ActionType {
+      val AddPoints = Expr("add_points")
+      val UpgradeTier = Expr("upgrade_tier")
+      val DowngradeTier = Expr("downgrade_tier")
+    }
 
-    //isConfirmed.ifTrue(isConfirmed)
-    //(isConfirmed && isExpensive).ifTrue(Action.constant("true")).otherwise(Action.constant("false"))
-    // (isConfirmed && isExpensive).ifTrue(setGold ++ increasePoints)
+    val statusCondition = Condition(FlightBooking.status.get === FlightBookingStatus.Confirmed)
+    
+    val priceCondition = Condition(FlightBooking.price.get > 1000.0)
+
+    val both = statusCondition && priceCondition
+
+    val addPointsExpr = (LoyaltyAction.actionType := ActionType.AddPoints) ++ (LoyaltyAction.points := 100)
+
+    val upgradeTierExpr = LoyaltyAction.actionType := ActionType.UpgradeTier
+    
+    val actions = Action.fromExpr(addPointsExpr) ++ Action.fromExpr(upgradeTierExpr)
+
+    val rule =  Rule(both, actions)
+
+    val engine = RuleEngine.fromRuleSet(RuleSet(Vector(rule)))
+
+    val facts = Facts.empty.add(FlightBooking.price, 100.0).add(FlightBooking.status, "Gold")
 
   }
 
 }
+
