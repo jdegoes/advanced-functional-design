@@ -21,10 +21,23 @@ import scala.language.implicitConversions
 object graduation {
 
 
-  sealed trait EngineType[A]
+  sealed trait EngineType[A] {
+    def equals(left: A, right: A): Boolean 
+    def lessThan(left: A, right: A): Boolean
+  }
   object EngineType {
-    final case class Primitive[A](primitiveType: PrimitiveType[A]) extends EngineType[A]
-    final case class Composite[Fields](factsType: FactsType[Fields]) extends EngineType[Facts[Fields]]
+
+    final case class Primitive[A](primitiveType: PrimitiveType[A]) extends EngineType[A] {
+      def equals(left: A, right: A): Boolean = primitiveType.ordering.equiv(left, right)
+
+      def lessThan(left: A, right: A): Boolean = primitiveType.ordering.lt(left, right)
+    }
+
+    final case class Composite[Fields](factsType: FactsType[Fields]) extends EngineType[Facts[Fields]] {
+      def equals(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+
+      def lessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+    }
 
     def fromPrimitive[A](implicit primitiveType: PrimitiveType[A]): EngineType[A] =
       Primitive(primitiveType)
@@ -49,6 +62,17 @@ object graduation {
     def divide(left: A, right: A): A
 
     def modulo(left: A, right: A): A
+
+    import PrimitiveType._
+    def primitiveType: PrimitiveType[A] =
+      (this match {
+        case _: Numeric.ByteIsNumeric.type => PrimitiveType.ByteType
+        case _: Numeric.CharIsNumeric.type => PrimitiveType.CharType
+        case _: Numeric.IntIsNumeric.type => PrimitiveType.IntType
+        case _: Numeric.LongIsNumeric.type => PrimitiveType.LongType
+        case _: Numeric.FloatIsNumeric.type => PrimitiveType.FloatType
+        case _: Numeric.DoubleIsNumeric.type => PrimitiveType.DoubleType
+      }).asInstanceOf[PrimitiveType[A]]
 
     def apply(binOp: NumericBinOpType)(left: A, right: A): A =
       binOp match {
@@ -141,19 +165,40 @@ object graduation {
    * A type class that represents the supported types for fact values.
    */
   @implicitNotFound("The type ${A} is not supported as a fact type and cannot be used for this method.")
-  sealed trait PrimitiveType[A]
+  sealed trait PrimitiveType[A] {
+    def ordering[T]: scala.math.Ordering[T]
+  }
+
   object PrimitiveType {
     def apply[T](implicit factType: PrimitiveType[T]): PrimitiveType[T] = factType
 
-    implicit case object Int     extends PrimitiveType[scala.Int]
-    implicit case object Long    extends PrimitiveType[scala.Long]
-    implicit case object String  extends PrimitiveType[java.lang.String]
-    implicit case object Double  extends PrimitiveType[scala.Double]
-    implicit case object Byte    extends PrimitiveType[scala.Byte]
-    implicit case object Char    extends PrimitiveType[scala.Char]
-    implicit case object Float   extends PrimitiveType[scala.Float]
-    implicit case object Boolean extends PrimitiveType[scala.Boolean]
-    implicit case object Instant extends PrimitiveType[java.time.Instant]
+    implicit case object IntType     extends PrimitiveType[scala.Int] {
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Int].asInstanceOf[Ordering[T]]
+    }
+    implicit case object LongType    extends PrimitiveType[scala.Long]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Long].asInstanceOf[Ordering[T]]
+    }
+    implicit case object StringType  extends PrimitiveType[java.lang.String]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[String].asInstanceOf[Ordering[T]]
+    }
+    implicit case object DoubleType  extends PrimitiveType[scala.Double]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Double].asInstanceOf[Ordering[T]]
+    }
+    implicit case object ByteType    extends PrimitiveType[scala.Byte]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Byte].asInstanceOf[Ordering[T]]
+    }
+    implicit case object CharType    extends PrimitiveType[scala.Char]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Char].asInstanceOf[Ordering[T]]
+    }
+    implicit case object FloatType   extends PrimitiveType[scala.Float]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Float].asInstanceOf[Ordering[T]]
+    }
+    implicit case object BooleanType extends PrimitiveType[scala.Boolean]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[Boolean].asInstanceOf[Ordering[T]]
+    }
+    implicit case object InstantType extends PrimitiveType[java.time.Instant]{
+      def ordering[T]: scala.math.Ordering[T] = Ordering[java.time.Instant].asInstanceOf[Ordering[T]]
+    }
   }
 
   sealed trait Expr[-In, +Out] { self =>
@@ -263,65 +308,75 @@ object graduation {
     implicit def apply[Out](out: Facts[Out]): Expr[Any, Facts[Out]] = 
       Constant(out, EngineType.fromFacts(out))
 
-    def evalWith[In, Out](in: Facts[In], expr: Expr[In, Out]): (EngineType[Out], Out) = ???
+      
+    def eval[In, Out](in: Facts[In], expr: Expr[In, Out]): Out = evalWithType(in, expr)._2
 
-    def eval[In, Out](in: Facts[In], expr: Expr[In, Out]): Out =
+    def evalWithType[In, Out](in: Facts[In], expr: Expr[In, Out]): (EngineType[Out], Out) = 
       expr match {
         case Fact(factDef, value) => 
           implicit val tag = factDef.tag
-          ???
-          //Facts.empty.add[FactDefinition](factDef, value)
+
+          val result = Facts.empty.add(factDef, value)
+          (EngineType.fromFacts(result).asInstanceOf[EngineType[Out]], result)
 
         case CombineFacts(lhs, rhs) => 
           val left = eval(in, lhs)
           val right = eval(in, rhs)
-          left ++ right
-
-        case Constant(value, tag) => value
+          val results = left ++ right
+          (EngineType.fromFacts(results).asInstanceOf[EngineType[Out]], results)
+        
+        case Constant(value, tag) => 
+          (tag.asInstanceOf[EngineType[Out]], value)
 
         case And(lhs, rhs) => 
           val left = eval(in, lhs)
           val right = eval(in, rhs)
-          left && right
+          (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left && right)
 
         case Or(lhs, rhs) => ???
           val left = eval(in, lhs)
           val right = eval(in, rhs)
-          left || right
+          (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], left || right)
 
         case Not(condition) => 
-          !eval(in, condition)
+          (EngineType.fromPrimitive[Boolean].asInstanceOf[EngineType[Out]], !eval(in, condition))
 
         case EqualTo(lhs, rhs) =>
-          val left = eval(in, lhs)
-          val right = eval(in, rhs)
+          val (leftType, left) = evalWithType(in, lhs)
+          val (rightType, right) = evalWithType(in, rhs)
           
-          left == right
+          import PrimitiveType._
+
+          (EngineType.fromPrimitive(PrimitiveType[Boolean]).asInstanceOf[EngineType[Out]],
+          leftType.equals(left, right))
 
         case LessThan(lhs, rhs) =>
-          val left = eval(in, lhs)
-          val right = eval(in, rhs)
-          ???
+          val (leftType, left) = evalWithType(in, lhs)
+          val (rightType, right) = evalWithType(in, rhs)
+          
+          import PrimitiveType._
+
+          (EngineType.fromPrimitive(PrimitiveType[Boolean]).asInstanceOf[EngineType[Out]],
+          leftType.lessThan(left, right))
 
         case Input(factDef) => 
           val fieldValue = Unsafe.unsafe { implicit u =>
             in.unsafe.get(factDef)
           }
-          fieldValue // no need to cast it to Out ?
+          factDef.tag -> fieldValue.asInstanceOf[Out] // no need to cast it to Out ?
 
-        case Pipe(left, right) => 
-          ???
-
+        case Pipe(left, right) => ???
+          
         case BinaryNumericOp(lhs, rhs, op, tag0) => 
           val tag = tag0.asInstanceOf[Numeric[Out]]
           val left: Out  = eval(in, lhs)
           val right: Out = eval(in, rhs) 
-          tag(op)(left, right)
+          (EngineType.fromPrimitive(tag.primitiveType), tag(op)(left, right))
 
         case IfThenElse(condition, ifTrue, ifFalse) =>
           val bool = eval(in, condition)
-          if (bool) eval(in, ifTrue)
-          else eval(in, ifFalse)
+          if (bool) evalWithType(in, ifTrue)
+          else evalWithType(in, ifFalse)
 
       }
 
