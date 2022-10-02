@@ -1,4 +1,4 @@
-package net.degoes.afd
+package net.degoes.afd.ruleengine
 
 import zio._
 import zio.test._ 
@@ -6,8 +6,10 @@ import zio.test.TestAspect._
 
 object ExampleSpec extends ZIOSpecDefault {
   
-  import net.degoes.afd.ruleengine.graduation._ 
-  import net.degoes.afd.ruleengine.graduation.loyalty._ 
+  import graduation._
+  import graduation2._ 
+  import loyalty_model._
+  import fixture._
 
   val priceCondition = Condition(FlightBooking.price.get > 1000.0)
   val upgradeTier = Action.fromExpr {
@@ -54,11 +56,9 @@ object ExampleSpec extends ZIOSpecDefault {
         val program = LoyaltyProgram("id", 0, LoyaltyTier.Bronze)
 
         val expectedProgram = LoyaltyProgram("id", 100, LoyaltyTier.Gold)
-        val updated = LoyaltyAction.update(program, actions.get)
+        val updated = ActionExecutor.update(program, actions.get)
 
         assertTrue(updated == expectedProgram)
       })      
-
-    
 
 }
