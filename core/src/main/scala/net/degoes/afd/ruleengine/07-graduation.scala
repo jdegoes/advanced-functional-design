@@ -34,9 +34,9 @@ object graduation {
     }
 
     final case class Composite[Fields](factsType: FactsType[Fields]) extends EngineType[Facts[Fields]] {
-      def equals(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+      def equals(left: Facts[Fields], right: Facts[Fields]): Boolean = left == right
 
-      def lessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = ???
+      def lessThan(left: Facts[Fields], right: Facts[Fields]): Boolean = left.lessThan(right)
     }
 
     def fromPrimitive[A](implicit primitiveType: PrimitiveType[A]): EngineType[A] =
@@ -501,10 +501,9 @@ object graduation {
     }
 
     private def execute[In, Out](ruleSet: RuleSet[In, Out], in: Facts[In]): Option[List[Out]] =
-      //ruleSet.rules.find(_.condition.eval(in)).map { rule =>
-      //  rule.action.update(in)}
-
-      ???
+      ruleSet.rules.find(_.condition.eval(in)).map { rule =>
+        rule.action.eval(in)
+      }
   }
 
   final case class Rule[-In, +Out](condition: Condition[In], action: Action[In, Out])
@@ -534,22 +533,30 @@ object graduation {
    * Contains a collection of facts, whose structure is described by a phantom
    * type parameter.
    */
-  sealed abstract case class Facts[+Types] private (private val data: Map[FactDefinition[_], Any]) {
+  sealed abstract case class Facts[+Types] private (private val data: Map[FactDefinition[_], Any]) { self =>
     def ++[Types2](that: Facts[Types2]): Facts[Types & Types2] =
       new Facts[Types & Types2](data ++ that.data) {}
 
     def definitions: Chunk[FactDefinition[_]] = Chunk.fromIterable(data.keys)
     
-    def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
+    override def equals(that: Any): Boolean = 
+      that match {
+        case that: Facts[_] => self.data == that.data
+        case _ => false
+      }
+      
+      def lessThan(that: Facts[_]) = false 
+
+      def get[Key <: Singleton with String, Value: PrimitiveType](pd: FactDefinition[(Key, Value)])(implicit
       subset: Types <:< (Key, Value)
     ): Value =
       data(pd).asInstanceOf[Value]
 
-    /**
-     * Returns a new facts collection with the specified primitive fact added.
-     */
-    def add[Key <: Singleton with String, Value](
-      pd: FactDefinition.KeyValue[Key, Value],
+      /**
+       * Returns a new facts collection with the specified primitive fact added.
+       */
+      def add[Key <: Singleton with String, Value](
+        pd: FactDefinition.KeyValue[Key, Value],
       value: Value
     ): Facts[Types & (Key, Value)] =
       new Facts[Types & (Key, Value)](data + (pd -> value)) {}
@@ -562,6 +569,7 @@ object graduation {
       value: Facts[Types2]
     ): Facts[Types & (Key, Facts[Types2])] =
       new Facts[Types & (Key, Facts[Types2])](data + (pd -> value)) {}
+
 
     object unsafe {
       def get(pd: FactDefinition[_])(implicit unsafe: Unsafe): Option[Any] = data.get(pd)
@@ -605,6 +613,17 @@ object graduation {
 
     def >>>[Out2](that: Action[Out, Out2]): Action[In, Out2] =
       Action.Pipe(self, that)
+
+    def eval(facts: Facts[In]): List[Out] = 
+        self match {
+          case Action.Concat(left, right) =>
+            left.eval(facts) ++ right.eval(facts)
+
+          case Action.Pipe(left, right) => ???
+          
+          case Action.FromExpr(expr) =>
+            List(expr.eval(facts))
+        }
   }
   object Action {
     final case class Concat[In, Out](left: Action[In, Out], right: Action[In, Out])          extends Action[In, Out]
@@ -612,7 +631,7 @@ object graduation {
     final case class FromExpr[In, Out](expr: Expr[In, Out])                                  extends Action[In, Out]
 
     def fromExpr[In, Out](expr: Expr[In, Out]): Action[In, Out] = FromExpr(expr)
-
+  
   }
 
   object loyalty {
